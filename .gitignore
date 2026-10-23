@@ -17,3 +17,4 @@ ppaslink.sh
 build/
 # build.sh runtime state (SPIRAM link-closure cache marker; host-specific)
 units/.idfheap-spiram-state
+units/.idfheap-spiram-state-*

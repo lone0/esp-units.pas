@@ -61,9 +61,10 @@ workspace was removed *after* every one of its functions moved here.
 | `units/README.md` | API docs + examples for both units |
 | `tests/` | the suite: 33 renamed webtbs regressions + `t_generics_collections_tstack` (moved demo) + probes (`probe-enc`, `probe-idfheap`) + compile-only unit `u_generics_pubsub_events.pas`; subdir `thread-stubs/` (designed-loud failures, out of stats); `run-tests.sh`, `README.md` per-test docs |
 | `examples/` | unit demonstrations, read-first/run-by-hand (`idfheap-smoke.pas` + `README.md` table); NOT part of the suite runner |
-| `scripts/build.sh` | cross-compile (`--soc esp32s3|esp32c3`; per-SoC table at top) |
-| `scripts/mkflash.sh` | elf/bin → flash image (fixed layout 0x0 bootloader / 0x8000 partition table / 0x10000 app) |
-| `scripts/run-qemu.sh` | image → QEMU boot, serial on stdout, `-no-reboot` |
+| `scripts/build.sh` | cross-compile (`--soc esp32s3|esp32s31`; per-SoC table at top; env required, no path defaults) |
+| `scripts/mkflash.sh` | elf/bin → flash image (bootloader/PT offsets from SDK sdkconfig; app @ 0x10000) |
+| `scripts/run-qemu.sh` | image → QEMU boot (esp32s3); esp32s31 is a placeholder → `run-esp-emu.sh` |
+| `scripts/run-esp-emu.sh` | image → esp-emu boot for esp32s31 (QEMU has no S31 machine yet) |
 | `scripts/flash.sh` | image → real port **only** when `--port` given |
 | `.gitignore` | build/run artifacts; the durable record is these docs + reruns |
 
@@ -96,26 +97,31 @@ workspace was removed *after* every one of its functions moved here.
 
 ## 4. Environment interfaces
 
-All auto-derived from the toolchain's own `fpc.cfg` where possible; every
-value env-overridable; no hardcoded ESP version anywhere.
+No host-path or IDF-version defaults. Required vars error out if unset.
+Binutils / IDF root may still be *discovered* from the toolchain `fpc.cfg`
+`-Fl` lines once `ESP_FPC_ROOT*` is set.
 
-| Variable | Default | Note |
+| Variable | Required? | Note |
 |---|---|---|
-| `ESP_FPC_ROOT` | *(host-specific; `scripts/build.sh` carries the author's reference-machine path as fallback)* | xtensa fpc-cross install |
-| `ESP_FPC_ROOT_C3` | *(none — hard error if building for C3)* | riscv32 toolchain when available |
-| `ESP32_SDK_PROJECT` | *(host-specific; both scripts carry a reference-machine path as fallback)* | a built ESP-IDF project (`idf.py build`); provides bootloader/PT/sdkconfig for linking + imaging; **both scripts also sniff `build/config/sdkconfig.h`** — `build.sh` for the SPIRAM link closure, `run-qemu.sh` for the PSRAM boot recipe |
-| `ESP_IDF_PATH` | *(derived from fpc.cfg `-Fl` lines)* | ESP-IDF root; the compiler's linker invokes its `esptool.py` |
-| `ESP_TOOLCHAIN_BIN` | *(derived from fpc.cfg)* | `<xtensa|riscv32>-esp-elf/bin` (compiler shells `as`/`ld` out by name) |
-| `ESP_PYTHON_BIN` | *(derived: `idf<MAJOR.MINOR>` venv matching the IDF root)* | the venv `python` that must import `esptool` during linking |
-| `ESP_IDF_VERSION` | `5.2.8` | → `-WP5.2.8` (unit `espidf_50200`) |
-| QEMU | auto-found under `~/.espressif/tools/qemu-xtensa` | espressif qemu-system-xtensa |
+| `ESP_FPC_ROOT` | yes | fpc-cross install for this build; `--soc` selects `ppcrossxtensa` / `ppcrossriscv32` inside it |
+| `ESP_IDF_VERSION` | yes | passed as `-WP…` (e.g. `6.1`); no default |
+| `ESP32_SDK_PROJECT` | yes | built ESP-IDF project (bootloader/PT/sdkconfig / SPIRAM libs) |
+| `ESP_IDF_PATH` | if no `ESP_PYTHON_BIN` / no `-Fl` hit | ESP-IDF root |
+| `ESP_TOOLCHAIN_BIN` | optional | else from `fpc.cfg` `-Fl` …/`<toolchain>`/… |
+| `ESP_PYTHON_BIN` | optional | else `~/.espressif/python_env/idf<MM>_*/bin` from IDF path name |
+| `ESP_QEMU` | optional | else `qemu-system-xtensa` on `PATH` / under `~/.espressif/tools` |
+| `ESP_EMU` | optional | else `esp-emu` on `PATH` |
 
 ## 5. Verification recipe (current toolchain, expected results)
 
 ```sh
 cd esp-units.pas                                # repo root
-scripts/build.sh examples/idfheap-smoke.pas     # cross-compile ok
+# export ESP_FPC_ROOT ESP_IDF_VERSION ESP32_SDK_PROJECT ESP_IDF_PATH …
+scripts/build.sh examples/idfheap-smoke.pas     # cross-compile ok (esp32s3)
 scripts/run-qemu.sh examples/idfheap-smoke.elf   # boots; pool numbers + exit 0
+# point ESP_FPC_ROOT (+ ESP32_SDK_PROJECT) at the riscv32 install, then:
+scripts/build.sh --soc esp32s31 examples/idfheap-smoke.pas
+scripts/run-esp-emu.sh examples/idfheap-smoke.elf  # S31 via esp-emu (not QEMU)
 cd tests && ./run-tests.sh                      # expect all green (see below)
 scripts/flash.sh examples/idfheap-smoke.elf     # image only (no port -> no write)
 
@@ -150,10 +156,9 @@ suspecting this repo.
 
 ## 6. Open threads (recorded, not decided)
 
-- `esp32c3`: rv32a backend file exists in the (frozen) espatomics dir; the
-  *script path* is table-ready. Supporting it needs an external
-  ppcrossriscv32 install + one QEMU boot verification — worth ~one boot test,
-  independent of espatomics testing.
+- `esp32s31`: build + `run-esp-emu.sh` when `ESP_FPC_ROOT` points at a
+  riscv32 install and `ESP32_SDK_PROJECT` is set. QEMU has no S31 machine —
+  `run-qemu.sh --soc esp32s31` is a placeholder that points at `run-esp-emu.sh`.
 - A multi-MB PSRAM alloc + checksum *test* program (the user asked for the
   example-level PSRAM demo, delivered 2026-10-24; a suite-grade test with a
   checksum over several MB in PSRAM is still unwritten).

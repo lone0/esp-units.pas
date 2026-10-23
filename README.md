@@ -24,49 +24,50 @@ It contains two kinds of things:
      `TInterlockedEsp` fetch/CAS/acquire-release via the chip's
      compare-and-swap instruction, `TAtomicFlag` spin lock. Multi-SoC by
      construction: an xtensa backend (S3/S2/classic), an RV32A backend
-     (C3/C6), an ARM32 backend, and a stock fallback; the activ
+     (C3/C6), an ARM32 backend, and a stock fallback; the active
      backend is selected at compile time.
 
 ## Quickstart
 
+Scripts take **no host-path defaults**. Export the toolchain locations first:
+
 ```sh
-# one-time: an IDF project must have been built once (bootloader + partition
-# table + sdkconfig for linking/QEMU). Defaults point at the sibling
-# workspace's blink-s3; override with ESP32_SDK_PROJECT=/your/own/project.
+export ESP_IDF_VERSION=6.1                 # whatever -WP your RTL expects
+export ESP_IDF_PATH=/path/to/esp-idf       # or set ESP_PYTHON_BIN
+# optional: ESP_TOOLCHAIN_BIN, ESP_PYTHON_BIN, ESP_QEMU, ESP_EMU
 
-# 1. build a program (default SoC: esp32s3)
+# ESP_FPC_ROOT = install for *this* build. Switch it when you switch SoC.
+# --soc only selects ppcrossxtensa vs ppcrossriscv32 + MCU flags inside that root.
+
+export ESP_FPC_ROOT=/path/to/fpc-cross-xtensa
+export ESP32_SDK_PROJECT=/path/to/built-idf-project-for-s3
 scripts/build.sh examples/idfheap-smoke.pas
-
-# 2. boot it in QEMU (serial console on stdout)
 scripts/run-qemu.sh examples/idfheap-smoke.elf
 
-# 3. full regression suite
-cd tests && ./run-tests.sh
-
-# 4. produce the flash image for real hardware (writes only with --port!)
-scripts/flash.sh examples/idfheap-smoke.elf
+export ESP_FPC_ROOT=/path/to/fpc-cross-riscv32
+export ESP32_SDK_PROJECT=/path/to/built-idf-project-for-s31
+scripts/build.sh --soc esp32s31 examples/idfheap-smoke.pas
+scripts/run-esp-emu.sh examples/idfheap-smoke.elf
 ```
 
 ## SoC support
 
 | SoC | Cores/ISA | State |
 |---|---|---|
-| esp32s3 | 2× xtensa lx7 | implemented & tested here |
-| esp32c3 | 1× riscv32 | designed for (`--soc esp32c3`, rv32a atomics backend present); needs an external ppcrossriscv32 toolchain install |
+| esp32s3 | 2× xtensa lx7 | implemented (`run-qemu.sh`) |
+| esp32s31 | 1× riscv32 ILP32F | implemented (`--soc esp32s31`); boot with `run-esp-emu.sh` (QEMU unsupported) |
 | others | — | add a row in `scripts/build.sh`'s SoC table |
 
-## Prerequisites (all external, all overridable)
+## Prerequisites (all external, all required via env)
 
-| Need | Where/How |
+| Need | Env |
 |---|---|
-| FreePascal freertos cross toolchain | `ESP_FPC_ROOT` (default: the sibling toolchain workspace on this machine; the tree with `lib/fpc/3.3.1/ppcrossxtensa`) |
-| ESP-IDF project, built once | `ESP32_SDK_PROJECT` (default: the sibling workspace's `blink-s3`) — its `build/` provides bootloader, partition table, and the SDK libs the fpc.cfg links against |
-| `esptool` | comes with an IDF install (`ESP_IDF_PATH`, python env) |
-| Espressif QEMU | auto-found under `~/.espressif/tools/qemu-xtensa/*` |
-
-No ESP-version tie: set `ESP_IDF_VERSION` to match the interface unit your
-toolchain ships (default `5.2.8` → `espidf_50200`); the unit sources and
-scripts never hardcode an IDF version.
+| FreePascal freertos cross toolchain | `ESP_FPC_ROOT` (point at the install for the SoC you are building) |
+| IDF version for `-WP` | `ESP_IDF_VERSION` (no default) |
+| Built ESP-IDF project | `ESP32_SDK_PROJECT` |
+| ESP-IDF / esptool python | `ESP_IDF_PATH` and/or `ESP_PYTHON_BIN` (also discoverable from `fpc.cfg` `-Fl` for IDF root + binutils) |
+| Espressif QEMU | `ESP_QEMU` or `qemu-system-xtensa` on `PATH` |
+| esp-emu (S31) | `ESP_EMU` or `esp-emu` on `PATH` |
 
 ## Layout
 
@@ -77,5 +78,5 @@ scripts never hardcode an IDF version.
 | `tests/README.md` | **per-test documentation**: purpose, expected outcome, pitfalls |
 | `tests/run-tests.sh` | the suite runner |
 | `examples/` | **example programs demonstrating units** (read-first, run-by-hand; `examples/README.md` table) |
-| `scripts/` | `build.sh` · `run-qemu.sh` (QEMU boot image + boot) · `mkflash.sh` (image only) · `flash.sh` (image → a real port when you pass `--port`) |
+| `scripts/` | `build.sh` · `run-qemu.sh` (QEMU) · `run-esp-emu.sh` (esp32s31) · `mkflash.sh` · `flash.sh` |
 | `AGENTS.md` | design criteria, verification recipe and decisions record for AI agents |
