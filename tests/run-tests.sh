@@ -21,6 +21,13 @@ for f in ${1:-*.pas}; do
         printf '%-14s %-9s %s\n' "$n" COMPFAIL "$(grep -aE 'Fatal:|Error:' "$n.clog" | head -1 | cut -c1-60)"
         continue
     fi
+    # u_* sources are units: compile-only fixtures (a unit builds to .ppu/.o,
+    # never to an .elf, so there is nothing to boot - verbatim trunk shape).
+    if [ "${n#u_}" != "$n" ]; then
+        rm -f "$n.ppu"
+        printf '%-14s %-9s %s\n' "$n" COMPILE-ONLY "ok"
+        continue
+    fi
     timeout 15 ../scripts/run-qemu.sh "$PWD/$n.elf" >"$n.qemu.log" 2>&1
     if grep -aqE "$CRX" "$n.qemu.log"; then
         printf '%-14s %-9s %s\n' "$n" CRASH \

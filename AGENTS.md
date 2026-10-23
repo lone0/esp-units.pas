@@ -1,11 +1,12 @@
-# AGENTS.md — esp-atomics.pas (for AI agents; humans are welcome)
+# AGENTS.md — esp-units.pas (for AI agents; humans are welcome)
 
 **State one-liner:** standalone application-side repository: ESP32-family
 Pascal utility units + compiler verification programs + SoC-parameterized
 automation scripts + unit examples. fpc / esp-idf / qemu are **external
-tools**. Verified 2026-10-23 with the current toolchain: suite **36 PASS /
-0 CRASH / 0 COMPFAIL** from this path (§5) plus the `examples/`
-`idfheap-smoke` demo verified built+booted; `fpc-hello` in the toolchain
+tools**. Verified 2026-10-24 with the current toolchain: suite **35 runtime
+PASS / 0 CRASH / 0 COMPFAIL** + 1 compile-only from this path (§5) plus the
+`examples/` `idfheap-smoke` demo verified built+booted (SPIRAM on and off);
+`fpc-hello` in the toolchain
 workspace was removed *after* every one of its functions moved here.
 **Nothing is committed until the user asks.**
 
@@ -13,7 +14,7 @@ workspace was removed *after* every one of its functions moved here.
 
 ## 1. Identity & purpose (from the user's own words — treat as design law)
 
-- Name: **esp-atomics.pas** (the `.pas` is part of the project's name and
+- Name: **esp-units.pas** (the `.pas` is part of the project's name and
   will appear on GitHub as such; the repo dir carries it too).
 - **Two kinds of content** and only those:
   1. *test programs* — verify and demonstrate the compiler's abilities on
@@ -32,14 +33,14 @@ workspace was removed *after* every one of its functions moved here.
   FreeRTOS API surface; the version enters only via `ESP_IDF_VERSION`
   (→ the toolchain's `espidf_<NNN>` interface unit).
 - **fpc patches do not belong here.** Compiler/toolchain fixes live in the
-  toolchain workspace (`/mnt/storage/rewind-fpc-esp`: pristine-upstream FPC
-  worktree + 4-patch series + guarded rebuild). If a test here fails for a
+  separate (private) toolchain workspace: a pristine-upstream FPC worktree
+  + a 4-patch series + a guarded rebuild setup. If a test here fails for a
   *compiler-internal* reason, that is a report-upstream topic, not a reason
   to enlarge this repo.
 - **`units/espatomics/` is FROZEN — user decision 2026-10-23:** no changes,
-  no tests written for it, in this repo. The directory is verbatim from the
-  sibling prototype `/mnt/storage/fpc-esp/esp.atomics/prototype/` (sources
-  only; md5-verified). Document its API in `units/README.md`; do not edit
+  no tests written for it, in this repo. The directory is a verbatim copy
+  of the prototype used in its DESIGN (sources only; verified by checksum
+  at copy time). Document its API in `units/README.md`; do not edit
   the sources; do not add `t_atomics_*` tests. Demand for unit changes goes
   back to the user, not into this tree.
 - **Docs have prescribed forms:**
@@ -58,7 +59,7 @@ workspace was removed *after* every one of its functions moved here.
 | `units/idfheap.pp` | IDF-heap memory-manager bridge (**first in uses** rule); suite-exercised every run |
 | `units/espatomics/` | atomics unit pair **(frozen, §1)**: `espatomics.pas` (class helper `TInterlockedEsp` + `TAtomicFlag`, backend selection via `$I`: xtensa / rv32a / arm32 / stock), `freertosinterlocked.pas` (32-bit `TInterlocked` baseline), 6 `.inc`, `DESIGN.md` |
 | `units/README.md` | API docs + examples for both units |
-| `tests/` | the suite: 33 renamed webtbs regressions + `t_generics_collections_tstack` (moved demo) + probes (`probe-enc`, `probe-idfheap`) + compile-only `u_generics_pubsub_events.pas`; subdirs `thread-stubs/` (designed-loud failures, out of stats), `static-heap-repro/` (the one `-Ch65536` program), `trace-repro/`; `run-tests.sh`, `README.md` per-test docs |
+| `tests/` | the suite: 33 renamed webtbs regressions + `t_generics_collections_tstack` (moved demo) + probes (`probe-enc`, `probe-idfheap`) + compile-only unit `u_generics_pubsub_events.pas`; subdir `thread-stubs/` (designed-loud failures, out of stats); `run-tests.sh`, `README.md` per-test docs |
 | `examples/` | unit demonstrations, read-first/run-by-hand (`idfheap-smoke.pas` + `README.md` table); NOT part of the suite runner |
 | `scripts/build.sh` | cross-compile (`--soc esp32s3|esp32c3`; per-SoC table at top) |
 | `scripts/mkflash.sh` | elf/bin → flash image (fixed layout 0x0 bootloader / 0x8000 partition table / 0x10000 app) |
@@ -100,9 +101,9 @@ value env-overridable; no hardcoded ESP version anywhere.
 
 | Variable | Default | Note |
 |---|---|---|
-| `ESP_FPC_ROOT` | `/mnt/storage/rewind-fpc-esp/fpc-cross` | xtensa toolchain |
+| `ESP_FPC_ROOT` | *(host-specific; `scripts/build.sh` carries the author's reference-machine path as fallback)* | xtensa fpc-cross install |
 | `ESP_FPC_ROOT_C3` | *(none — hard error if building for C3)* | riscv32 toolchain when available |
-| `ESP32_SDK_PROJECT` | `/mnt/storage/rewind-fpc-esp/blink-s3` | built once (`idf.py build`); provides bootloader/PT/sdkconfig for linking + imaging |
+| `ESP32_SDK_PROJECT` | *(host-specific; both scripts carry a reference-machine path as fallback)* | a built ESP-IDF project (`idf.py build`); provides bootloader/PT/sdkconfig for linking + imaging; **both scripts also sniff `build/config/sdkconfig.h`** — `build.sh` for the SPIRAM link closure, `run-qemu.sh` for the PSRAM boot recipe |
 | `ESP_IDF_PATH` | *(derived from fpc.cfg `-Fl` lines)* | ESP-IDF root; the compiler's linker invokes its `esptool.py` |
 | `ESP_TOOLCHAIN_BIN` | *(derived from fpc.cfg)* | `<xtensa|riscv32>-esp-elf/bin` (compiler shells `as`/`ld` out by name) |
 | `ESP_PYTHON_BIN` | *(derived: `idf<MAJOR.MINOR>` venv matching the IDF root)* | the venv `python` that must import `esptool` during linking |
@@ -112,29 +113,40 @@ value env-overridable; no hardcoded ESP version anywhere.
 ## 5. Verification recipe (current toolchain, expected results)
 
 ```sh
-cd /mnt/storage/esp-atomics.pas
+cd esp-units.pas                                # repo root
 scripts/build.sh examples/idfheap-smoke.pas     # cross-compile ok
 scripts/run-qemu.sh examples/idfheap-smoke.elf   # boots; pool numbers + exit 0
-cd tests && ./run-tests.sh                      # expect 36 PASS / 0 CRASH / 0 COMPFAIL
+cd tests && ./run-tests.sh                      # expect all green (see below)
 scripts/flash.sh examples/idfheap-smoke.elf     # image only (no port -> no write)
 
 # designed failures (run manually, each prints its designed outcome):
 cd tests/thread-stubs
 ../scripts/build.sh t_cs_noop.pas && timeout 8 ../scripts/run-qemu.sh "$PWD/t_cs_noop.elf"
-
-# the one program needing a static heap:
-cd ../static-heap-repro
-../scripts/build.sh -Ch65536 probe-idfmm.pas && timeout 15 ../scripts/run-qemu.sh "$PWD/probe-idfmm.elf"
 ```
 
-The suite floor is **36 PASS / 0 CRASH / 0 COMPFAIL** (33 webtbs + 2 probes
-+ 1 moved demo) plus the three `thread-stubs/` designed outcomes (`cs ok`,
-`ESyncObjectException`, TThread-stub exception) and the `examples/`
-demonstration built+booted by hand (its output is listed in
-`examples/README.md`). If a regression fails for compiler-internal reasons,
-verify against the toolchain workspace
-(`/mnt/storage/rewind-fpc-esp/AGENTS.md` §9 rebuild recipe) before suspecting
-this repo.
+The suite floor is **all green**: 35 runtime PASS / 0 CRASH / 0 COMPFAIL
+(33 webtbs + 2 probes + 1 moved demo) plus the compile-only unit verdict
+`u_generics_pubsub_events` (COMPILE-ONLY, no boot), plus the three
+`thread-stubs/` designed outcomes (`cs ok`, `ESyncObjectException`,
+TThread-stub exception) and the `examples/` demonstration built+booted by
+hand (its output is listed in `examples/README.md`). If a regression fails
+for compiler-internal reasons, verify against a known-good toolchain
+rebuild (the private toolchain workspace's build documentation) before
+suspecting this repo.
+
+**SPIRAM variant (enabled in `blink-s3` since 2026-10-24, verified
+2026-10-24).** Same commands; expected differences:
+- `build.sh` auto-detects `CONFIG_SPIRAM 1` in the SDK project's
+  `sdkconfig.h` and adds `-dESPSDK_SPIRAM -Fl…/esp_psram` (see
+  `units/README.md` for why + traps).
+- the example then prints `-> PSRAM` for *every* line and a ~32 MB heap
+  (`IDF pool: … size=~33591564`); even the 4096-byte `GetMem` is PSRAM —
+  IDF reserves 32 KiB internal for cap-flagged allocations
+  (`CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL`), pushing default allocations
+  to the external pool.
+- `run-qemu.sh` auto-switches to the PSRAM boot (bootlog: `octal_psram`
+  detection + `esp_psram: Found 32MB PSRAM device`); suite re-verified
+  all-green under the SPIRAM SDK with the same auto-switching.
 
 ## 6. Open threads (recorded, not decided)
 
@@ -142,15 +154,15 @@ this repo.
   *script path* is table-ready. Supporting it needs an external
   ppcrossriscv32 install + one QEMU boot verification — worth ~one boot test,
   independent of espatomics testing.
-- PSRAM probe: `idfheap` benefits automatically once `CONFIG_SPIRAM` is
-  enabled in the SDK project; a multi-MB alloc + checksum test is the
-  natural next *test* program (QEMU-side facts in §8 make this emulate).
+- A multi-MB PSRAM alloc + checksum *test* program (the user asked for the
+  example-level PSRAM demo, delivered 2026-10-24; a suite-grade test with a
+  checksum over several MB in PSRAM is still unwritten).
 
 ## 7. ESP32 programming knowledge for writing code in this repo
 
 Distilled, hardware/RTM-verified facts an agent needs when writing a new
-test or unit here. (The toolchain workspace's AGENTS.md §10 is the deeper
-version; this section is self-sufficient for application-side work.)
+test or unit here. (The private toolchain workspace documentation is the
+deeper version; this section is self-sufficient for application-side work.)
 
 **Memory model.** Everything runs in internal SRAM by default:
 data SRAM `0x3FC88000–0x3FD00000` (FPC heap + RTOS stacks + IDF), IRAM
@@ -225,6 +237,18 @@ DMA buffers stay internal by default.
   project matters: `CONFIG_ESP_CONSOLE_UART_DEFAULT=y` (+ secondary USJ)
   shows serial in QEMU; `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y` alone boots
   fine but prints *nothing*.
+- **`run-qemu.sh` auto-switches now (2026-10-24).** It reads the SDK
+  project's `build/config/sdkconfig.h`: with `CONFIG_SPIRAM 1` it boots the
+  full recipe above (`-m 32M`, efuse drive + `nvram`/`timg` `-global`s,
+  octal `-global` when `CONFIG_SPIRAM_MODE_OCT 1`), generating
+  `build/qemu_efuse.bin` on first use (1 KiB, byte 38 = `0x0c` — identical
+  to `idf.py qemu`'s own image, md5 `ad7ad345bc3a2fb71a55c0d6a44fa612`);
+  without it the plain `-M <machine> -drive …,if=mtd` boot is unchanged.
+  QEMU never exits after the program halts — keep the `timeout` cap
+  (30 s for the PSRAM boot, which takes a few more seconds to initialize).
+- **The PSRAM link closure lives in FPC-land, not QEMU-land** (see
+  `units/README.md`): SPIRAM links need a used unit with
+  `{$linklib esp_psram,static}` — command-line `-k-l<name>` does not work.
 - 15 s wall-clock cap per boot is plenty for every current suite program.
 - Guru/panic text appears verbatim in the serial log; symbolize crashes with
   `xtensa-esp32s3-elf-addr2line` on the program's `.elf` (espressif toolchain

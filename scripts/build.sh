@@ -75,6 +75,33 @@ export PATH="$PYBIN:$PATH"
 
 IDF_VER=${ESP_IDF_VERSION:-5.2.8}
 
+# --- SPIRAM link closure ----------------------------------------------------
+# When the SDK project was built WITH CONFIG_SPIRAM, its esp_system/freertos
+# archives gain references to esp_psram_* symbols (libesp_psram.a). FPC only
+# injects an extra archive when a USED unit carries {$linklib <n>,static}; a
+# command-line -k-l<lib> does NOT work (the -l is scanned before the IDF
+# object list pulls the esp_psram_* references, verified 2026-10-24). idfheap
+# carries the matching conditional {$linklib esp_psram,static}, guarded by
+# -dESPSDK_SPIRAM. On a define-state flip the unit's ppu must be wiped:
+# FPC tracks source timestamps, not conditional defines, so a ppu built
+# without the define would silently keep failing links.
+PRJ=${ESP32_SDK_PROJECT:-/mnt/storage/rewind-fpc-esp/blink-s3}
+CFGH=$PRJ/build/config/sdkconfig.h
+if grep -aq '^#define CONFIG_SPIRAM 1' "$CFGH" 2>/dev/null; then
+  PSRAM_LIBDIR=$PRJ/build/esp-idf/esp_psram
+  [ -f "$PSRAM_LIBDIR/libesp_psram.a" ] || {
+    echo "SPIRAM sdkconfig detected in $CFGH but $PSRAM_LIBDIR/libesp_psram.a is missing - rebuild the SDK project (idf.py build) first" >&2
+    exit 1
+  }
+  STAMP=$REPO/units/.idfheap-spiram-state
+  if [ ! -f "$STAMP" ] || [ "$(cat "$STAMP" 2>/dev/null)" != "$PSRAM_LIBDIR" ]; then
+    rm -f "$REPO/units/idfheap.ppu" "$REPO/units/idfheap.o"
+    printf '%s\n' "$PSRAM_LIBDIR" > "$STAMP"
+  fi
+  set -- -dESPSDK_SPIRAM "-Fl$PSRAM_LIBDIR" "$@"
+fi
+
+
 # Notes:
 #  - -Tfreertos + -Wp<MCU> + -WP<IDF ver>: the freertos target, chip id and
 #    the espidf interface-unit generation (the toolchain's fpc.cfg carries the

@@ -29,9 +29,7 @@ named meaningfully from the start.
 **Memory manager.** Every runtime-tested program (and the `thread-stubs/`
 demos) has `idfheap` FIRST in its `uses` — the whole suite runs on the
 IDF-pool manager and no program carries a static `-Ch` block (the toolchain's
-`fpc.cfg` no longer contains `-Ch`). The compile-only files never reach QEMU.
-The static heapmgr remains reachable with an explicit `-Ch65536` — see
-`static-heap-repro/` for the only probe that needs it.
+`fpc.cfg` no longer contains `-Ch`); the compile-only unit never boots.
 
 ---
 
@@ -78,7 +76,7 @@ regressions are for: they crash on the bug they guard.
 | t_nan_default_param_forward | NaN as default param + forward declaration | compile-only NORUN in trunk; here silent, exit 0 | — |
 | t_execprocess_funcresult | `ExecuteProcess` with function-result arguments | silent, exit 0 | freertos `ExecuteProcess` is a stub no-op: expect no side effects, the test guards compilation + teardown only |
 | probe-enc | TEncoding singleton memory + `IsStandardEncoding` guard (regression for the teardown UAF) | `TEncoding.Default @<3FCxxxxx> :` + hex dumps + `is standard : TRUE` + `SYSUTILS+CLASSES init ok, now exiting`, exit 0 | — |
-| probe-idfheap | IDF capability probe: free sizes, largest block, 64 KiB `heap_caps_malloc` + free | `idf internal free=~369KB largest=~304KB`, `idf SPIRAM free=0B` (`0` = `CONFIG_SPIRAM` off), `idf alloc ok @<addr> (64KB)`, `idf free ok`, exit 0 | SPIRAM line prints `0` until PSRAM is enabled in the SDK project — that is a *fact to observe*, not a failure |
+| probe-idfheap | IDF capability probe: free sizes, largest block, 64 KiB `heap_caps_malloc` + free | `idf internal free=~36xKB largest=~27xKB`, `idf SPIRAM free=33354672B` (SPIRAM SDK per §5; `0` when `CONFIG_SPIRAM` is off), `idf alloc ok @<addr> (64KB)`, `idf free ok`, exit 0 | pitfall | the SPIRAM number is a *fact to observe*: `0` = PSRAM disabled, a ~33 MB figure = enabled. The 64 KiB probe alloc requests only `MALLOC_CAP_8BIT` and still lands in internal SRAM (`3FCA…`) — `heap_caps_malloc` scans the (faster) internal pool first and it has room; only the allocator *default* path pushes allocations to PSRAM under `CONFIG_SPIRAM_USE_MALLOC` |
 
 (The `idfheap` unit *demonstration* moved to `../examples/idfheap-smoke.pas`
 — see `../examples/README.md`; it is not part of the suite runner.)
@@ -93,19 +91,6 @@ regressions are for: they crash on the bug they guard.
 
 Run them manually (`../scripts/build.sh`, then `../scripts/run-qemu.sh` with a
 shorter timeout); details in `thread-stubs/README.md`.
-
-### `static-heap-repro/` — the mid-run manager hot-swap probe
-
-`probe-idfmm.pas` installs an IDF-pool manager **mid-run** over an
-initialized static heap — the one program structurally requiring `-Ch65536`
-(its own README has the exact commands and expected output). Not part of the
-default suite (the runner has no per-test flags).
-
-### `trace-repro/` — heap-trace-ledger diagnostics
-
-Compile-time incompatible with the normal RTL (needs a `-dfpc_HEAPTRACE`
-RTL build; recipe in the toolchain workspace AGENTS.md §9 step 5 variant d).
-See `trace-repro/README.md`.
 
 ---
 
@@ -126,23 +111,25 @@ an RTL problem, and therefore out of scope for this repo:
 
 ## Current state
 
-Last full run: **36 PASS / 0 CRASH / 0 COMPFAIL** (2026-10-23, verified from
+Last full run: **35 runtime PASS / 0 CRASH / 0 COMPFAIL** + 1 compile-only
+(2026-10-24, verified from
 this repo path: 33 webtbs programs + `probe-enc` + `probe-idfheap` + the
 moved `t_generics_collections_tstack` demo; `u_generics_pubsub_events`
-compile-only; the `idfheap` unit demo runs as `../examples/idfheap-smoke.pas`
-outside the runner). Historical root-cause notes below are kept as the
+is COMPILE-ONLY — a unit, so it builds but never boots; the `idfheap` unit
+demo runs as `../examples/idfheap-smoke.pas` outside the runner). Historical
+root-cause notes below are kept as the
 debugging record:
 
 | Group | Tests | Status / root cause |
 |---|---|---|
 | math, SysUtils, TypInfo, Types, fgl (pure) | converged to PASS | `_haltproc exit code: 0` on every one |
-| **Classes exit-teardown bug — SOLVED** | t_classes_minimal, t_classes_ifdeclared, t_generics_enum_list_decl, t_generics_queue_capacity, t_generics_implicit_specialization, t_generics_dictionary_recordkey, t_generics_comparer_enum | **Root cause in the compiler, not the RTL**: `ncpuutil.pas` generated `FPC_FINALIZE_FUNC_TABLE` iterating init/finalize entries *forward*, so finalization ran in the *same* order as initialization. SysUtils' `TEncoding` class destructor freed+unregistered the standard-encoding singletons *before* Classes' teardown; `TStrings.Destroy`'s `IsStandardEncoding(FDefaultEncoding)` guard then returned FALSE against the emptied list and **freed the already-dead `TEncoding.Default` singleton** (use-after-free, proven by the heapmgr trace ledger in `trace-repro/`: the singleton's chunk freed early, merge rewrites zeroing its VMT slot, `EXCVADDR 0x30`). Fix: emit the finalize list in reverse init order (`compiler/xtensa/ncpuutil.pas`, toolchain patch `xtensa-04-finalize-order.patch`). All seven PASS. |
+| **Classes exit-teardown bug — SOLVED** | t_classes_minimal, t_classes_ifdeclared, t_generics_enum_list_decl, t_generics_queue_capacity, t_generics_implicit_specialization, t_generics_dictionary_recordkey, t_generics_comparer_enum | **Root cause in the compiler, not the RTL**: `ncpuutil.pas` generated `FPC_FINALIZE_FUNC_TABLE` iterating init/finalize entries *forward*, so finalization ran in the *same* order as initialization. SysUtils' `TEncoding` class destructor freed+unregistered the standard-encoding singletons *before* Classes' teardown; `TStrings.Destroy`'s `IsStandardEncoding(FDefaultEncoding)` guard then returned FALSE against the emptied list and **freed the already-dead `TEncoding.Default` singleton** (use-after-free, proven by a heapmgr trace ledger under a `-dfpc_HEAPTRACE` RTL rebuild: the singleton's chunk freed early, merge rewrites zeroing its VMT slot, `EXCVADDR 0x30`). Fix: emit the finalize list in reverse init order (`compiler/xtensa/ncpuutil.pas`, toolchain patch `xtensa-04-finalize-order.patch`). All seven PASS. |
 | main-task stack too small | t_formatfloat_neg_zeropad | **FIXED** — IDF `CONFIG_ESP_MAIN_TASK_STACK_SIZE` raised 3584 → 8192 in the SDK project (`blink-s3/sdkconfig.defaults`, rebuilt); runs clean. |
-| missing widestringmanager init — SOLVED | probe-idfmm surfaced it (see `static-heap-repro/`) | freertos sysutils never called `InitInternational`, so the `widestringmanager` compare/text procs stayed nil; `AnsiCompareStr/Text`, `AnsiStrComp`, and — via `TStringList.DoCompareText` — every `TStringList.Sort`/case-insensitive `Find` did `callx8` through a nil pointer (`InstrFetchProhibited`, PC=0). Fix in `rtl/freertos/sysutils.pp` (initialization calls `InitInternational`, same as unix/os2/amicommon), toolchain patch `freertos-03-sysutils-initinternational.patch`. The suite had no coverage of those paths — the memory-manager probe was the discoverer. |
+| missing widestringmanager init — SOLVED | surfaced by the (now-removed) mid-run memory-manager hot-swap probe | freertos sysutils never called `InitInternational`, so the `widestringmanager` compare/text procs stayed nil; `AnsiCompareStr/Text`, `AnsiStrComp`, and — via `TStringList.DoCompareText` — every `TStringList.Sort`/case-insensitive `Find` did `callx8` through a nil pointer (`InstrFetchProhibited`, PC=0). Fix in `rtl/freertos/sysutils.pp` (initialization calls `InitInternational`, same as unix/os2/amicommon), toolchain patch `freertos-03-sysutils-initinternational.patch`. The suite had no coverage of those paths — the memory-manager probe was the discoverer. |
 | not applicable, removed (see above) | tw16315b / tw3721 | compile-level trunk limits, removed rather than carried as permanent COMPFAILs. |
 
-**Heap demand of the suite** (measured with a `-dfpc_HEAPTRACE` RTL build in
-the toolchain workspace: the heapmgr instrumentation prints `PEAK <bytes>
+**Heap demand of the suite** (measured with a `-dfpc_HEAPTRACE` RTL build;
+the heapmgr instrumentation prints `PEAK <bytes>
 LIVE <bytes>` at exit): worst concurrent usage across all runnable tests is
 **2648 bytes** (`t_generics_dictionary_recordkey`), runners-up 2404
 (`t_generics_queue_capacity`), 2284 (`t_generics_implicit_specialization`,

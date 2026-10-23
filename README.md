@@ -1,4 +1,4 @@
-# esp-atomics.pas — Pascal utilities and compiler-verification programs for ESP32 MCUs
+# esp-units.pas — Pascal utilities and compiler-verification programs for ESP32 MCUs
 
 A light, readable project: FreePascal source only. The compiler
 (`fpc`), the SDK (`esp-idf`) and the emulator (`qemu-system-xtensa`,

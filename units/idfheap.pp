@@ -2,6 +2,19 @@ unit idfheap;
 
 {$mode objfpc}{$H+}
 
+{ PSRAM SDK closure: when the ESP-IDF project is built WITH CONFIG_SPIRAM,
+  its startup/flash archives reference esp_psram_* symbols which live in
+  libesp_psram.a. FPC only adds an archive to the link when a USED unit
+  carries {$linklib}; this directive is compiled in only when build.sh
+  detects the SPIRAM sdkconfig and passes -dESPSDK_SPIRAM (plus the
+  -Fl path of build/esp-idf/esp_psram). The ",static" suffix is REQUIRED:
+  without it the directive silently does not register. On a non-SPIRAM
+  project the define is absent and even linking against the archive
+  would be wrong (it may not exist), so both halves are conditional. }
+{$ifdef ESPSDK_SPIRAM}
+{$linklib esp_psram,static}
+{$endif}
+
 { Installs an IDF heap_caps_*-backed TMemoryManager at unit initialization -
   the production form of the manager routing demonstrated by probe-idfmm.
 
@@ -29,15 +42,15 @@ unit idfheap;
 
   Semantics:
    - RunError(203) on allocation failure, like the default manager;
-   - pointers inside the static __fpc_initialheap block (the window between
-     heapmgr's and our initialization is empty in practice, but the block
-     exists as long as -Ch is in effect) are delegated back to the captured
+   - pointers allocated while the static manager was still installed (the
+     window between heapmgr's and this unit's initialization is empty in
+     practice) are delegated back to the captured
      static manager - nothing in this build can free an IDF-heap pointer
      with the wrong manager;
    - GetHeapStatus/GetFPCHeapStatus return real IDF-pool numbers instead of
      the static manager's zeros;
-   - the static 64 KiB -Ch block still exists in BSS (cfg is global) but
-     stays unused; pass a smaller -Ch per program if every BSS byte counts. }
+   - if the program opts back into the static heap with an explicit -Ch,
+     that block exists in BSS but stays unused while idfheap is installed. }
 
 interface
 
