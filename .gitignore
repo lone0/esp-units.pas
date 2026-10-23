@@ -1,0 +1,17 @@
+# build artifacts — never commit
+*.o
+*.ppu
+*.a
+*.res
+link*.res
+*.elf
+*.bin
+*.img
+*.app
+ppas.sh
+ppaslink.sh
+# test-run artifacts (durable record = counts in AGENTS.md + rerunning run-tests.sh)
+*.clog
+*.qemu.log
+# toolchain/IDF junk
+build/
