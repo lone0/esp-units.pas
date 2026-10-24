@@ -5,11 +5,15 @@ can do on ESP32-family MCUs. Two groups:
 
 - **t_/u_ programs** — a curated subset of the FPC trunk regression suite
   (`tests/webtbs`), renamed to descriptive names; each is a compiler-bug
-  regression or an important-capability demonstration.
-- **probe-*/programs** — this project's own capability probes (encoding
-  services, IDF-heap routing) and the thread-contract demos in
-  `thread-stubs/` (designed loud failures, kept out of the PASS/CRASH stats).
-  Unit-API demonstrations live in `../examples/`, not in the suite.
+  regression or an important-capability demonstration. Own functional
+  tests (e.g. `t_encoding_roundtrip`) live here too, named meaningfully
+  from the start.
+- **No ad-hoc probe programs.** Self-authored throwaway probes are not
+  committed (policy, 2026-10-24): the deleted `probe-enc`/`probe-idfheap`
+  are covered by `t_classes_minimal`+`t_encoding_roundtrip` and
+  `../examples/idfheap-smoke` respectively. Thread-contract demos live in
+  `thread-stubs/` (designed loud failures, kept out of the PASS/CRASH
+  stats); unit-API demonstrations in `../examples/`.
 
 Run: `./run-tests.sh` (all) or `./run-tests.sh 't_math*.pas'` (glob), from
 `tests/`. Each program is cross-compiled with `../scripts/build.sh` and booted
@@ -72,11 +76,10 @@ regressions are for: they crash on the bug they guard.
 | t_generics_dictionary_recordkey | `TObjectDictionary<record,TObject>.ContainsKey` | silent, exit 0 | heaviest heap demand in the suite (≈2.6 KiB at init/teardown on the classic manager) — natural first suspect for OOM experiments |
 | t_generics_comparer_enum | `TEqualityComparer<enum>.Default` interface plumbing | `Done`, exit 0 | — |
 | t_generics_collections_tstack | ** moved demonstration** (from the toolchain workspace's fpc-hello): `Generics.Collections.TStack<record>` push/pop/extract/peek, record-with-strings `ToString` via `Format`, enumerator support | boot banner + `Ate a pancake (Pop): Pancake with meat`, `Ate a pancake (Extract): Pancake with curds`, `Last pancake: Pancake with cherry`, `Total pancakes: 3` + 3 enumerated lines + `Enumerated pancakes: 3`, exit 0 | terminal `Readln` of the desktop original removed (QEMU serial has no stdin — use `$MODE DELPHI`; no C-style `+=`) |
+| t_encoding_roundtrip | `TEncoding` core ops across ASCII / UTF-8 (incl. CJK U+55B5) / UTF-16LE + BOM: `GetBytes`, `GetString` round-trips, `GetPreamble` | per-check `: ok` lines (6 checks) + `t_encoding roundtrip OK`, exit 0 | hex output for determinism; exercises the applied freertos-03 fix (conversions go through the widestringmanager) |
 | u_generics_pubsub_events | generics Pub/Sub **unit** — compile-only capability proof | compile-only PASS ("no output") | deliberately has no `idfheap` in uses and never runs — do not "fix" that |
 | t_nan_default_param_forward | NaN as default param + forward declaration | compile-only NORUN in trunk; here silent, exit 0 | — |
 | t_execprocess_funcresult | `ExecuteProcess` with function-result arguments | silent, exit 0 | freertos `ExecuteProcess` is a stub no-op: expect no side effects, the test guards compilation + teardown only |
-| probe-enc | TEncoding singleton memory + `IsStandardEncoding` guard (regression for the teardown UAF) | `TEncoding.Default @<3FCxxxxx> :` + hex dumps + `is standard : TRUE` + `SYSUTILS+CLASSES init ok, now exiting`, exit 0 | — |
-| probe-idfheap | IDF capability probe: free sizes, largest block, 64 KiB `heap_caps_malloc` + free | `idf internal free=~36xKB largest=~27xKB`, `idf SPIRAM free=33354672B` (SPIRAM SDK per §5; `0` when `CONFIG_SPIRAM` is off), `idf alloc ok @<addr> (64KB)`, `idf free ok`, exit 0 | pitfall | the SPIRAM number is a *fact to observe*: `0` = PSRAM disabled, a ~33 MB figure = enabled. The 64 KiB probe alloc requests only `MALLOC_CAP_8BIT` and still lands in internal SRAM (`3FCA…`) — `heap_caps_malloc` scans the (faster) internal pool first and it has room; only the allocator *default* path pushes allocations to PSRAM under `CONFIG_SPIRAM_USE_MALLOC` |
 
 (The `idfheap` unit *demonstration* moved to `../examples/idfheap-smoke.pas`
 — see `../examples/README.md`; it is not part of the suite runner.)
@@ -111,10 +114,11 @@ an RTL problem, and therefore out of scope for this repo:
 
 ## Current state
 
-Last full run: **35 runtime PASS / 0 CRASH / 0 COMPFAIL** + 1 compile-only
-(2026-10-24, verified from
-this repo path: 33 webtbs programs + `probe-enc` + `probe-idfheap` + the
-moved `t_generics_collections_tstack` demo; `u_generics_pubsub_events`
+Inventory (2026-10-24, ESP-IDF-6.1 toolchain): **34 runtime programs +
+1 compile-only** --
+33 webtbs programs (incl. the compile-only unit) + the
+moved `t_generics_collections_tstack` demo + `t_encoding_roundtrip`;
+`u_generics_pubsub_events`
 is COMPILE-ONLY — a unit, so it builds but never boots; the `idfheap` unit
 demo runs as `../examples/idfheap-smoke.pas` outside the runner). Historical
 root-cause notes below are kept as the
@@ -135,7 +139,7 @@ LIVE <bytes>` at exit): worst concurrent usage across all runnable tests is
 (`t_generics_queue_capacity`), 2284 (`t_generics_implicit_specialization`,
 `t_generics_enum_list_decl`), 1804 (`t_generics_comparer_enum`), 1188
 (`t_trim_variant`), 704 (`t_classes_minimal`/`t_classes_ifdeclared`/
-`probe-enc` — the Classes baseline). Pure math/fgl tests peak at 112–136
+`t_classes_minimal` — the Classes baseline). Pure math/fgl tests peak at 112–136
 bytes (`consoleio`'s console write buffer). `LIVE` is 0 on every test at
 exit, i.e. teardown frees everything. These numbers are from the static-heap
 era; allocation volumes are manager-independent and the suite now allocates

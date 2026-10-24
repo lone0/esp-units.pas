@@ -3,8 +3,8 @@
 **State one-liner:** standalone application-side repository: ESP32-family
 Pascal utility units + compiler verification programs + SoC-parameterized
 automation scripts + unit examples. fpc / esp-idf / qemu are **external
-tools**. Verified 2026-10-24 with the current toolchain: suite **35 runtime
-PASS / 0 CRASH / 0 COMPFAIL** + 1 compile-only from this path (§5) plus the
+tools**. Inventory 2026-10-24 with the current toolchain: **34 runtime programs +
+1 compile-only** in this path (§5) plus the
 `examples/` `idfheap-smoke` demo verified built+booted (SPIRAM on and off);
 `fpc-hello` in the toolchain
 workspace was removed *after* every one of its functions moved here.
@@ -59,7 +59,7 @@ workspace was removed *after* every one of its functions moved here.
 | `units/idfheap.pp` | IDF-heap memory-manager bridge (**first in uses** rule); suite-exercised every run |
 | `units/espatomics/` | atomics unit pair **(frozen, §1)**: `espatomics.pas` (class helper `TInterlockedEsp` + `TAtomicFlag`, backend selection via `$I`: xtensa / rv32a / arm32 / stock), `freertosinterlocked.pas` (32-bit `TInterlocked` baseline), 6 `.inc`, `DESIGN.md` |
 | `units/README.md` | API docs + examples for both units |
-| `tests/` | the suite: 33 renamed webtbs regressions + `t_generics_collections_tstack` (moved demo) + probes (`probe-enc`, `probe-idfheap`) + compile-only unit `u_generics_pubsub_events.pas`; subdir `thread-stubs/` (designed-loud failures, out of stats); `run-tests.sh`, `README.md` per-test docs |
+| `tests/` | the suite: 33 renamed webtbs regressions (incl. compile-only `u_generics_pubsub_events.pas`) + `t_generics_collections_tstack` (moved demo) + `t_encoding_roundtrip` (TEncoding functional); subdir `thread-stubs/` (designed-loud failures, out of stats); `run-tests.sh`, `README.md` per-test docs. Self-authored ad-hoc probes are NOT committed (policy 2026-10-24). |
 | `examples/` | unit demonstrations, read-first/run-by-hand (`idfheap-smoke.pas` + `README.md` table); NOT part of the suite runner |
 | `scripts/build.sh` | cross-compile (`--soc esp32s3|esp32s31`; per-SoC table at top; env required, no path defaults) |
 | `scripts/mkflash.sh` | elf/bin → flash image (bootloader/PT offsets from SDK sdkconfig; app @ 0x10000) |
@@ -131,7 +131,7 @@ cd tests/thread-stubs
 ```
 
 The suite floor is **all green**: 35 runtime PASS / 0 CRASH / 0 COMPFAIL
-(33 webtbs + 2 probes + 1 moved demo) plus the compile-only unit verdict
+(33 webtbs incl. compile-only + 1 moved demo + 1 encoding functional test); full-suite green runs are per-toolchain milestones, not assumed per inventory
 `u_generics_pubsub_events` (COMPILE-ONLY, no boot), plus the three
 `thread-stubs/` designed outcomes (`cs ok`, `ESyncObjectException`,
 TThread-stub exception) and the `examples/` demonstration built+booted by
@@ -217,7 +217,8 @@ default. No deep recursion, no multi-KB locals.
 **PSRAM facts** (for probing): caps — `MALLOC_CAP_8BIT = 1 shl 2`,
 `MALLOC_CAP_SPIRAM = 1 shl 10`, `MALLOC_CAP_INTERNAL = 1 shl 11`,
 `MALLOC_CAP_DEFAULT = 1 shl 12`. Ask "exists": free size of
-`SPIRAM or 8BIT` (0 = off — exactly what `probe-idfheap.pas` prints). Ask
+`SPIRAM or 8BIT` (0 = off; observe via a `heap_caps_get_free_size` external
+as `examples/idfheap-smoke.pas` does). Ask
 "this pointer?": `esp_ptr_external_ram(p)` (PSRAM-specific), never raw range
 checks. Untouchable from ISRs / while flash cache disabled; slow vs SRAM;
 DMA buffers stay internal by default.
