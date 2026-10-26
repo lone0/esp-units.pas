@@ -218,9 +218,9 @@ threading section).
 `../examples/idfheap-smoke.pas` is the worked demonstration
 (GetMem/sorted TStringList/50 000-slot dynarray through the IDF pool; output
 documented in `../examples/README.md`). Inside the suite, *every* runtime
-program exercises it implicitly (it is first in `uses` everywhere), and
-`tests/probe-idfheap.pas` reports the raw `heap_caps_*` capabilities.
-Per-test details: `tests/README.md`.
+program exercises it implicitly (it is first in `uses` everywhere); the pool
+used/free/size numbers it prints through `GetHeapStatus` are real
+`heap_caps_get_info` figures. Per-test details: `tests/README.md`.
 
 `espatomics` deliberately ships **without tests in this repo** — it is
 maintained-and-verified as-is (compiled + hardware-verified in the sibling

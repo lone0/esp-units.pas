@@ -3,14 +3,20 @@
 #
 # For each *.pas in this dir: cross-compile via ../scripts/build.sh,
 # boot under QEMU (15 s cap), classify the serial log:
-#   PASS     - no Guru Meditation / panic / backtrace / "Runtime error"
-#   CRASH    - any of the above seen (detail: implicated line)
+#   PASS     - image actually booted, clean boot and clean exit, no crash text
+#   CRASH    - Guru Meditation / panic / backtrace / "Runtime error" seen
+#   NOBOOT   - QEMU never got as far as running the app (imaging/emulator
+#              error, or it died before the boot banner). Without this the
+#              absence of crash text would silently score such a run as PASS.
 #   COMPFAIL - program did not compile (unit missing / feature mismatch)
+#   COMPILE-ONLY - u_* unit: builds, nothing to boot
 #
 # Usage:  ./run-tests.sh              # all tests
 #         ./run-tests.sh 't_math*.pas'  # glob subset
 cd "$(dirname "$0")" || exit 1
 CRX='Guru|panic|Backtrace|Runtime error|SIGILL|LoadProhibited|StoreProhibited'
+# evidence that the image reached the CPU (ROM banner / IDF boot log / exit)
+BOOTED='ESP-ROM|rst:0x|Build:|_haltproc'
 printf '%-14s %-9s %s\n' TEST VERDICT DETAIL
 for f in ${1:-*.pas}; do
     [ -f "$f" ] || continue
@@ -29,9 +35,17 @@ for f in ${1:-*.pas}; do
         continue
     fi
     timeout 15 ../scripts/run-qemu.sh "$PWD/$n.elf" >"$n.qemu.log" 2>&1
+    rc=$?
     if grep -aqE "$CRX" "$n.qemu.log"; then
         printf '%-14s %-9s %s\n' "$n" CRASH \
           "$(grep -aE "$CRX" "$n.qemu.log" | head -1 | sed 's/\x1b\[[0-9;]*m//g' | cut -c1-50)"
+    elif ! grep -aqE "$BOOTED" "$n.qemu.log"; then
+        # The app never reached the CPU: imaging failed, the emulator is
+        # missing, or the run died before the boot banner. No crash text is
+        # present in that case, so without this branch it would read as PASS.
+        printf '%-14s %-9s %s\n' "$n" NOBOOT \
+          "$(sed 's/\x1b\[[0-9;]*m//g' "$n.qemu.log" | grep -av '^[[:space:]]*$' \
+             | tail -1 | cut -c1-40) (rc=$rc)"
     else
         h=$(grep -a '_haltproc called, exit code:' "$n.qemu.log" | tail -1 | sed 's/.*exit code:/exit:/')
         if [ -z "$h" ]; then

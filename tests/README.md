@@ -20,15 +20,18 @@ Run: `./run-tests.sh` (all) or `./run-tests.sh 't_math*.pas'` (glob), from
 under QEMU (15 s cap, `../scripts/run-qemu.sh`); the verdict is the *absence*
 of `Guru|panic|Backtrace|Runtime error|SIGILL|LoadProhibited|StoreProhibited`
 in the serial log, and the detail column shows the last program line (or
-`exit: N` for the closing `_haltproc` line). Per-test logs: `<name>.clog`
+`exit: N` for the closing `_haltproc` line). A log that never reached the boot
+banner (`ESP-ROM:`, `rst:0x…`, `Build:`) is scored **NOBOOT** — that catches
+imaging or emulator failures, which carry no crash text and would otherwise
+read as a pass. Per-test logs: `<name>.clog`
 (compile) and `<name>.qemu.log` (serial).
 
 **Naming & provenance.** Webtbs regressions are renamed from their upstream
 `tw<bugnr>` names to descriptive `t_<topic>_<what>.pas` (compile-only unit:
 `u_`). Provenance is kept twice: a `{ webtbs provenance: trunk
 tests/webtbs/tw<bugnr>.pas }` comment on line 1 of every renamed file, and the
-mapping table below. `probe-*` / `idfheap-smoke` are this project's own,
-named meaningfully from the start.
+mapping table below. `idfheap-smoke` (in `../examples/`) is this project's
+own, named meaningfully from the start.
 
 **Memory manager.** Every runtime-tested program (and the `thread-stubs/`
 demos) has `idfheap` FIRST in its `uses` — the whole suite runs on the

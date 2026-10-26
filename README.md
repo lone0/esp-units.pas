@@ -9,8 +9,8 @@ It contains two kinds of things:
 1. **Test programs** — verify and demonstrate what this compiler can do on
    real ESP32 MCUs: a curated subset of the FPC trunk regression suite
    (`t_*.pas`, provenance embedded line-by-line), capability demos
-   (`t_generics_collections_tstack.pas`), probes for the memory
-   manager and IDF-heap capabilities, and designed-failure demos of the
+   (`t_generics_collections_tstack.pas`, `t_encoding_roundtrip.pas`), and
+   designed-failure demos of the
    threading contract (`tests/thread-stubs/`). `tests/run-tests.sh` compiles
    each one with the cross compiler and boots it in QEMU, classifying the
    result (`PASS` = clean boot, clean exit).
@@ -29,7 +29,8 @@ It contains two kinds of things:
 
 ## Quickstart
 
-Scripts take **no host-path defaults**. Export the toolchain locations first:
+Scripts take **no host-path defaults**. Export the toolchain locations first
+(`scripts/build.sh --help` prints the same contract with concrete examples):
 
 ```sh
 export ESP_IDF_VERSION=6.1                 # whatever -WP your RTL expects
@@ -62,10 +63,10 @@ scripts/run-esp-emu.sh examples/idfheap-smoke.elf
 
 | Need | Env |
 |---|---|
-| FreePascal freertos cross toolchain | `ESP_FPC_ROOT` (point at the install for the SoC you are building) |
+| FreePascal freertos cross toolchain | `ESP_FPC_ROOT` (point at the install for the SoC you are building); no `fpc.cfg` editing needed — `build.sh` derives the binutils prefix, FPU mode, libc scheme and the IDF link closure |
 | IDF version for `-WP` | `ESP_IDF_VERSION` (no default) |
-| Built ESP-IDF project | `ESP32_SDK_PROJECT` |
-| ESP-IDF / esptool python | `ESP_IDF_PATH` and/or `ESP_PYTHON_BIN` (also discoverable from `fpc.cfg` `-Fl` for IDF root + binutils) |
+| Built ESP-IDF project | `ESP32_SDK_PROJECT` — its app must `REQUIRES` the components the freertos RTL link-lists (see `AGENTS.md` §4), or the archives simply do not exist |
+| ESP-IDF / esptool python | `ESP_IDF_PATH` and/or `ESP_PYTHON_BIN` (also discoverable from `fpc.cfg` `-Fl` for IDF root + binutils); esptool 4.x and 5.x CLI spellings are both handled |
 | Espressif QEMU | `ESP_QEMU` or `qemu-system-xtensa` on `PATH` |
 | esp-emu (S31) | `ESP_EMU` or `esp-emu` on `PATH` |
 

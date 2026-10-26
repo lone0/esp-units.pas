@@ -23,7 +23,8 @@ workspace was removed *after* every one of its functions moved here.
      (`idfheap` = bridge to the IDF heap manager; `espatomics` = atomics
      library for dual-core SoCs).
 - **Automation scripts** (`scripts/`) work across multiple SoCs of the
-  ESP32 family (S3 implemented today, C3 the designed second): they build
+  ESP32 family (esp32s3 in QEMU today, esp32s31 on the riscv32 path via
+  `run-esp-emu.sh`): they build
   Pascal programs, load them in QEMU, generate flash images for real hardware.
 - **fpc and esp-idf are external tools.** Keep the project light, simple,
   readable for human learners. Do not vendor toolchains; no build system
@@ -62,10 +63,10 @@ workspace was removed *after* every one of its functions moved here.
 | `tests/` | the suite: 33 renamed webtbs regressions (incl. compile-only `u_generics_pubsub_events.pas`) + `t_generics_collections_tstack` (moved demo) + `t_encoding_roundtrip` (TEncoding functional); subdir `thread-stubs/` (designed-loud failures, out of stats); `run-tests.sh`, `README.md` per-test docs. Self-authored ad-hoc probes are NOT committed (policy 2026-10-24). |
 | `examples/` | unit demonstrations, read-first/run-by-hand (`idfheap-smoke.pas` + `README.md` table); NOT part of the suite runner |
 | `scripts/build.sh` | cross-compile (`--soc esp32s3|esp32s31`; per-SoC table at top; env required, no path defaults) |
-| `scripts/mkflash.sh` | elf/bin → flash image (bootloader/PT offsets from SDK sdkconfig; app @ 0x10000) |
+| `scripts/mkflash.sh` | elf/bin → flash image (bootloader/PT offsets from SDK sdkconfig; app @ 0x10000). Default padding = full flash size (QEMU needs 2/4/8/16 MB); `--tight` pads to the content end only |
 | `scripts/run-qemu.sh` | image → QEMU boot (esp32s3); esp32s31 is a placeholder → `run-esp-emu.sh` |
 | `scripts/run-esp-emu.sh` | image → esp-emu boot for esp32s31 (QEMU has no S31 machine yet) |
-| `scripts/flash.sh` | image → real port **only** when `--port` given |
+| `scripts/flash.sh` | image → real port **only** when `--port` given; writes the `--tight` (content-only) image at 460800 baud (`--baud`/`ESP_BAUD` to change) |
 | `.gitignore` | build/run artifacts; the durable record is these docs + reruns |
 
 ## 3. Ground rules for this repo
@@ -100,6 +101,49 @@ workspace was removed *after* every one of its functions moved here.
 No host-path or IDF-version defaults. Required vars error out if unset.
 Binutils / IDF root may still be *discovered* from the toolchain `fpc.cfg`
 `-Fl` lines once `ESP_FPC_ROOT*` is set.
+`scripts/build.sh --help` prints this contract with example values (it runs
+with no environment set).
+The link closure and binutils prefix are **derived by `build.sh`** from
+`ESP32_SDK_PROJECT` / `ESP_IDF_PATH` / `ESP_TOOLCHAIN_BIN`: `-XP<…>-esp-…-elf-`
+from the toolchain dir, plus `-Fl` for the project's `build/esp-idf/**`
+(recursive — some components keep archives below the top level, e.g.
+`mbedtls/mbedtls/library/libmbedcrypto.a`), IDF's per-chip `ld` scripts and
+prebuilt libs, and the toolchain's libgcc/sysroot.
+If neither the env nor the toolchain `fpc.cfg` names the binutils dir / IDF
+root, they are read from the SDK project's `build/project_description.json`
+(`c_compiler`, `idf_path`). The FPU mode is read from the installed RTL with
+`ppudump` (`-Cfsoft`/`-Cfhard`) so it cannot mismatch the units; the package
+units are probed the same way, because a *partially* reinstalled toolchain
+(RTL rebuilt with one FPU mode, `rtl-generics`/`rtl-objpas` left from an older
+build) makes every package unit look like a missing one — `build.sh` warns
+about exactly that and the cure is `make all install` with a single flag set.
+**Libc scheme:** IDF 6.x builds `esp_libc` on top of the toolchain's
+*picolibc*, while the same toolchain still ships a legacy newlib `libc.a` in
+`xtensa-esp-elf/lib/<chip>`. Both define `printf`/`malloc`, so order decides:
+when the project built `esp_libc`, its startup object needs picolibc's
+`__bufio_*`, so `…/picolibc/*/lib/<chip>` is placed **before** the other
+`-Fl` dirs automatically.
+A plain `make install` `fpc.cfg` therefore works; a hand-prepared cfg (like
+the 5.2.8 install) keeps working — duplicate `-Fl` lines are harmless.
+
+**The SDK project must build what the RTL links.** The freertos binding
+(`espidf_<NNN>`) carries `{$linklib}` entries for a fixed archive list; a
+component that the app never required is never built, so its `.a` does not
+exist and the link fails with `cannot find lib….a`. Minimal working
+`main/CMakeLists.txt` closure for a Pascal app:
+
+```cmake
+idf_component_register(SRCS "hello_world_main.c"
+                       PRIV_REQUIRES spi_flash
+                       REQUIRES esp_phy esp_coex esp_gdbstub espcoredump driver
+                                vfs mbedtls esp_driver_uart
+                                esp_driver_usb_serial_jtag esp_ringbuf
+                                esp_psram
+                       INCLUDE_DIRS "")
+```
+
+(`esp_psram` only when SPIRAM is on.) Trimming the binding is *not* the fix;
+widening the project's `REQUIRES` is.
 
 | Variable | Required? | Note |
 |---|---|---|
@@ -123,22 +167,37 @@ scripts/run-qemu.sh examples/idfheap-smoke.elf   # boots; pool numbers + exit 0
 scripts/build.sh --soc esp32s31 examples/idfheap-smoke.pas
 scripts/run-esp-emu.sh examples/idfheap-smoke.elf  # S31 via esp-emu (not QEMU)
 cd tests && ./run-tests.sh                      # expect all green (see below)
-scripts/flash.sh examples/idfheap-smoke.elf     # image only (no port -> no write)
+scripts/flash.sh examples/idfheap-smoke.elf     # image only (no port -> no write; --tight size ~0.3 MB, not 16 MB)
 
 # designed failures (run manually, each prints its designed outcome):
 cd tests/thread-stubs
 ../scripts/build.sh t_cs_noop.pas && timeout 8 ../scripts/run-qemu.sh "$PWD/t_cs_noop.elf"
 ```
 
-The suite floor is **all green**: 35 runtime PASS / 0 CRASH / 0 COMPFAIL
-(33 webtbs incl. compile-only + 1 moved demo + 1 encoding functional test); full-suite green runs are per-toolchain milestones, not assumed per inventory
-`u_generics_pubsub_events` (COMPILE-ONLY, no boot), plus the three
+The suite is **34 runtime programs + 1 compile-only** (33 webtbs programs,
+one of them the compile-only unit, + the moved `t_generics_collections_tstack`
+demo + `t_encoding_roundtrip`). The floor is **all green**: 34 runtime PASS /
+0 CRASH / 0 COMPFAIL, with `u_generics_pubsub_events` COMPILE-ONLY (a unit —
+it builds but never boots). A full-suite green run is a per-toolchain
+milestone, not something the inventory alone guarantees. Add the three
 `thread-stubs/` designed outcomes (`cs ok`, `ESyncObjectException`,
 TThread-stub exception) and the `examples/` demonstration built+booted by
 hand (its output is listed in `examples/README.md`). If a regression fails
 for compiler-internal reasons, verify against a known-good toolchain
 rebuild (the private toolchain workspace's build documentation) before
 suspecting this repo.
+
+A PASS requires the image to have *run*: the runner demands boot evidence
+(`ESP-ROM:`, `rst:0x…`, `Build:` or `_haltproc`) before it accepts a log as
+clean, and reports **NOBOOT** when imaging/emulation never got that far —
+otherwise a broken `mkflash.sh`/QEMU invocation would show up as a green run
+with the tool's error text in the detail column.
+
+**esptool dialects.** `mkflash.sh` and `flash.sh` detect the esptool major
+version and use v4's underscore spelling (`--flash_size`, `merge_bin`,
+`write_flash`) or v5+'s hyphenated one (`--flash-size`, `merge-bin`,
+`write-flash`), so an IDF 5.x venv and an IDF 6.x venv both work; the version
+in the `-WP` unit and the venv on `PATH` are independent choices.
 
 **SPIRAM variant (enabled in `blink-s3` since 2026-10-24, verified
 2026-10-24).** Same commands; expected differences:
@@ -217,8 +276,9 @@ default. No deep recursion, no multi-KB locals.
 **PSRAM facts** (for probing): caps — `MALLOC_CAP_8BIT = 1 shl 2`,
 `MALLOC_CAP_SPIRAM = 1 shl 10`, `MALLOC_CAP_INTERNAL = 1 shl 11`,
 `MALLOC_CAP_DEFAULT = 1 shl 12`. Ask "exists": free size of
-`SPIRAM or 8BIT` (0 = off; observe via a `heap_caps_get_free_size` external
-as `examples/idfheap-smoke.pas` does). Ask
+`SPIRAM or 8BIT` (0 = off — declare `heap_caps_get_free_size` as an external,
+or read the used/free/size figures `examples/idfheap-smoke.pas` prints through
+`idfheap`'s `GetHeapStatus`). Ask
 "this pointer?": `esp_ptr_external_ram(p)` (PSRAM-specific), never raw range
 checks. Untouchable from ISRs / while flash cache disabled; slow vs SRAM;
 DMA buffers stay internal by default.
