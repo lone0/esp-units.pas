@@ -4,13 +4,14 @@
 # INVARIANT (see ../AGENTS.md): fpc and esp-idf are EXTERNAL tools to this
 # repo. This script never guesses where they live — set the env vars below.
 #
-# Usage:   scripts/build.sh [--soc esp32s3|esp32s31] [fpc options] <prog.pas>
+# Usage:   scripts/build.sh [--soc esp32s3|esp32s31] [--c src.c …] [fpc options]
+#                           <prog.pas>
 #          scripts/build.sh prog.pas                 # default SoC: esp32s3
 # Output:  prog.o / prog.elf / prog.bin / prog.img written next to the source.
 #
 # Required environment:
 #   ESP_FPC_ROOT       fpc-cross install for *this* build — tree with
-#                      lib/fpc/<ver>/ppcross{xtensa|riscv32} and lib/fpc/etc/fpc.cfg.
+#                      lib/fpc/<ver>/ppcross{xtensa|riscv32} (fpc.cfg optional).
 #                      Point it at the xtensa tree for esp32s3, the riscv32 tree
 #                      for esp32s31 (or any future SoC). --soc only selects the
 #                      binary name + MCU flags inside that root.
@@ -26,7 +27,9 @@ REPO=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 
 usage() {
   cat <<'EOF'
-usage: scripts/build.sh [--soc esp32s3|esp32s31] [fpc options] <prog.pas>
+usage: scripts/build.sh [--soc esp32s3|esp32s31] [--c src.c …] [--obj o …]
+                        [--lib name|file.a …] [--cflags "…"] [fpc options]
+                        <prog.pas>
 
 Cross-build a Pascal program for an ESP32-family SoC.
 
@@ -35,6 +38,8 @@ Required environment (this script never guesses host paths):
                        esp32s3  -> the tree holding lib/fpc/<ver>/ppcrossxtensa
                        esp32s31 -> the tree holding lib/fpc/<ver>/ppcrossriscv32
                      e.g.  ESP_FPC_ROOT=$HOME/fpc-cross/fpc-xtensa
+                     lib/fpc/etc/fpc.cfg is optional: unit paths, binutils prefix,
+                     link closure, FPU mode and libc scheme are all derived here.
   ESP_IDF_VERSION    version string passed as -WP; selects the espidf_<NNN> unit
                      e.g.  ESP_IDF_VERSION=6.1
   ESP32_SDK_PROJECT  a built ESP-IDF project (idf.py build already run):
@@ -78,6 +83,9 @@ Derived automatically (no hand-edited fpc.cfg needed):
   libc scheme       <- when the project built esp_libc (IDF 6.x), the
                        toolchain's picolibc lib/<chip> is searched before the
                        legacy newlib dir; esp_libc needs picolibc's __bufio_*
+  C compile flags   <- with --c, the command IDF recorded for the project's
+                       main/ component in build/compile_commands.json (exact
+                       include order, chip codegen flags, defines)
 
 Options:
   --soc esp32s3      xtensa lx7 (default): ppcrossxtensa, -WpESP32S3
@@ -86,6 +94,16 @@ Options:
                      (e.g. -Ch1024 overrides a -Ch from fpc.cfg)
   --help             show this help
 
+C interop (a Pascal program calling C; details in ../AGENTS.md §4):
+  --c src.c          compile src.c with the derived cross gcc and link the
+                     object; repeatable. The object lands next to the source.
+  --obj file.o       link a prebuilt object (repeatable)
+  --lib name|file.a  link an archive (repeatable). A bare name is searched in
+                     the derived -Fl dirs (lib<name>.a); a path is used as is.
+                     Archives are pulled in with --whole-archive, because FPC
+                     passes -k arguments before its own objects.
+  --cflags "…"       extra C flags appended to the recorded IDF command
+
 Examples:
   export ESP_FPC_ROOT=... ESP_IDF_VERSION=6.1 ESP32_SDK_PROJECT=...
   scripts/build.sh examples/idfheap-smoke.pas
@@ -93,6 +111,9 @@ Examples:
   # switch SoC: point ESP_FPC_ROOT (and the SDK project) at the riscv32 pair
   ESP_FPC_ROOT=... ESP32_SDK_PROJECT=... \
     scripts/build.sh --soc esp32s31 examples/idfheap-smoke.pas
+
+  # Pascal + C in one build (C symbols declared "cdecl; external")
+  scripts/build.sh my-prog.pas --c my-module.c
 EOF
 }
 
@@ -128,13 +149,36 @@ find_ppc() {
 }
 
 soc=esp32s3
-if [ "$1" = "--soc" ]; then
-  [ $# -ge 2 ] || { echo "usage: $0 --soc <name> ..." >&2; exit 1; }
-  soc="$2"; shift 2
-fi
+C_SRCS=
+C_OBJS=
+C_LIBS=
+C_FLAGS_EXTRA=
+_keep=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --soc|--c|--obj|--lib|--cflags)
+      [ $# -ge 2 ] || { echo "error: $1 needs a value" >&2; exit 1; }
+      case "$1" in
+        --soc)    soc=$2 ;;
+        --c)      C_SRCS="$C_SRCS $2" ;;
+        --obj)    C_OBJS="$C_OBJS $2" ;;
+        --lib)    C_LIBS="$C_LIBS $2" ;;
+        --cflags) C_FLAGS_EXTRA="$C_FLAGS_EXTRA $2" ;;
+      esac
+      shift 2 ;;
+    --help) usage; exit 0 ;;
+    *) _keep="$_keep $1"; shift ;;
+  esac
+done
+# Rebuild the pass-through list without pathname expansion, so FPC options that
+# contain wildcards (-Fu/path/*) reach the compiler untouched.
+set -f
+set -- $_keep
+set +f
 
 [ $# -ge 1 ] || {
-  echo "usage: $(basename "$0") [--soc <name>] [fpc options] <prog.pas>" >&2
+  echo "usage: $(basename "$0") [--soc <name>] [--c <file.c>] [--obj <file.o>]" >&2
+  echo "       [--lib <name|file.a>] [--cflags \"…\"] [fpc options] <prog.pas>" >&2
   echo "       run $(basename "$0") --help for the required environment" >&2
   exit 1
 }
@@ -168,10 +212,16 @@ PPC=$(find_ppc "$FPC_ROOT" "$PPC_NAME")
 [ -x "$PPC" ] || { echo "cross compiler missing: $PPC" >&2; exit 1; }
 
 # Discover binutils + IDF root from the toolchain's own fpc.cfg -Fl lines
-# (env overrides win). No host path defaults.
+# (env overrides win). No host path defaults. The cfg is optional: a bare
+# `make install` carries nothing useful for this target, and a toolchain that is
+# mid-rebuild has no cfg at all — the unit search paths are derived below and
+# the binutils/IDF locations come from ESP_TOOLCHAIN_BIN or the SDK project.
 CFG=$FPC_ROOT/lib/fpc/etc/fpc.cfg
-[ -f "$CFG" ] || { echo "error: missing $CFG" >&2; exit 1; }
-TC_MATCH=$(sed -n "s|^ *-Fl\\(.*/$TOOLCHAIN_NAME/[^/]*\\)/$TOOLCHAIN_NAME/.*|\\1|p" "$CFG" 2>/dev/null | head -1)
+[ -f "$CFG" ] || CFG=
+TC_MATCH=
+if [ -n "$CFG" ]; then
+  TC_MATCH=$(sed -n "s|^ *-Fl\\(.*/$TOOLCHAIN_NAME/[^/]*\\)/$TOOLCHAIN_NAME/.*|\\1|p" "$CFG" 2>/dev/null | head -1)
+fi
 TC_BIN=
 if [ -n "${ESP_TOOLCHAIN_BIN:-}" ]; then
   TC_BIN=$ESP_TOOLCHAIN_BIN
@@ -195,7 +245,7 @@ fi
 if [ -n "${ESP_IDF_PATH:-}" ]; then
   IDF_PATH=$ESP_IDF_PATH
 else
-  IDF_PATH=$(sed -n 's|^ *-Fl\(/.*/esp-idf[^/]*\)/.*|\1|p' "$CFG" 2>/dev/null | head -1)
+  IDF_PATH=$(sed -n 's|^ *-Fl\(/.*/esp-idf[^/]*\)/.*|\1|p' "${CFG:-/dev/null}" 2>/dev/null | head -1)
   [ -n "$IDF_PATH" ] || IDF_PATH=$(json_val idf_path)
 fi
 [ -d "$TC_BIN" ] || {
@@ -338,6 +388,85 @@ else
 fi
 [ -d "$PYBIN" ] || { echo "idf python venv not found (set ESP_PYTHON_BIN)" >&2; exit 1; }
 export PATH="$PYBIN:$PATH"
+# --- C interop --------------------------------------------------------------
+# --c compiles a C source with the derived cross gcc and the include set the SDK
+# project itself used, then hands the object to FPC's linker; --obj/--lib do the
+# same for already-built inputs. Compiler, headers and flags are all derived, so
+# the repo still contains no toolchain.
+LINK_EXTRA=
+if [ -n "$C_SRCS" ]; then
+  C_CC="$TC_BIN/${BIN_PREFIX}gcc"
+  [ -x "$C_CC" ] || { echo "error: no C compiler at $C_CC (needed by --c)" >&2; exit 1; }
+  # Reuse the compile command IDF itself used for main/: it carries the exact,
+  # correctly ordered include set (105 dirs here), the chip codegen flags and
+  # the defines. Guessing a union of component includes instead picks up the
+  # unused Linux-compat component, whose bsd/sys/cdefs.h shadows libc's.
+  C_FLAGS=$(python - "$PRJ/build/compile_commands.json" <<'PY'
+import json, shlex, sys
+try:
+    db = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(0)
+if not db:
+    sys.exit(0)
+entry = next((e for e in db if "/main/" in (e.get("file") or "")), db[0])
+args = shlex.split(entry.get("command") or " ".join(entry.get("arguments") or []))
+out, skip = [], False
+for a in args[1:]:            # [0] is the compiler itself
+    if skip:
+        skip = False
+        continue
+    if a in ("-o", "-MT", "-MF", "-MJ", "-MQ"):
+        skip = True
+        continue
+    if a in ("-c", "-MD", "-MMD", "-MP") or a.startswith("-o") \
+       or a.startswith("-fmacro-prefix-map") or a.startswith("-fdiagnostics"):
+        continue
+    # Only flags and @response-files: the entry also lists the object path and
+    # the source itself as bare arguments.
+    if a.startswith("-") or a.startswith("@"):
+        out.append(a)
+print(" ".join(out))
+PY
+)
+  [ -n "$C_FLAGS" ] || {
+    echo "error: --c needs $PRJ/build/compile_commands.json" >&2
+    echo "       (idf.py build writes it; run that in $PRJ first)" >&2
+    exit 1
+  }
+  for s in $C_SRCS; do
+    [ -f "$s" ] || { echo "error: no such C source: $s" >&2; exit 1; }
+    o=${s%.*}.o
+    echo "cc $s"
+    $C_CC $C_FLAGS -c -o "$o" "$s" $C_FLAGS_EXTRA || exit 1
+    C_OBJS="$C_OBJS $o"
+  done
+fi
+for o in $C_OBJS; do
+  [ -f "$o" ] || { echo "error: no such object: $o" >&2; exit 1; }
+  case "$o" in /*) ;; *) o="$(pwd)/$o" ;; esac
+  LINK_EXTRA="$LINK_EXTRA -k$o"
+done
+for l in $C_LIBS; do
+  case "$l" in
+    *.a|*/*) p=$l ;;
+    *) p=
+       for fl in $FL_OPTS; do
+         d=${fl#-Fl}
+         [ -f "$d/lib$l.a" ] && { p="$d/lib$l.a"; break; }
+       done ;;
+  esac
+  [ -n "$p" ] && [ -f "$p" ] || {
+    echo "error: archive not found for --lib $l" >&2
+    echo "       searched the derived -Fl dirs; pass a path to the .a instead" >&2
+    exit 1
+  }
+  # FPC hands -k arguments to the linker *before* its own objects, so a plain
+  # archive reference would be scanned before anything needs it. Pull every
+  # member in instead; for a small C-module archive that is the intended use.
+  LINK_EXTRA="$LINK_EXTRA -k--whole-archive -k$p -k--no-whole-archive"
+done
+
 
 # --- SPIRAM link closure ----------------------------------------------------
 # When the SDK project was built WITH CONFIG_SPIRAM, its esp_system/freertos
@@ -359,8 +488,28 @@ if grep -aq '^#define CONFIG_SPIRAM 1' "$CFGH" 2>/dev/null; then
   set -- -dESPSDK_SPIRAM "-Fl$PSRAM_LIBDIR" "$@"
 fi
 
+# RTL/package unit paths, derived: the cfg is optional (a bare or mid-rebuild
+# install may have none), but system / sysutils / classes / Generics.* still
+# have to be found. FPC expands the '*' itself, so it stays a single argument.
+UNIT_ROOT=
+for d in "$FPC_ROOT"/lib/fpc/*/units/"${PPC_NAME#ppcross}"-freertos; do
+  [ -d "$d" ] && { UNIT_ROOT=$d; break; }
+done
+if [ -n "$UNIT_ROOT" ]; then
+  set -- "-Fu$UNIT_ROOT" "-Fu$UNIT_ROOT/*" "$@"
+fi
+
+# Repo unit search paths, derived generically: units/ itself plus every one of
+# its subdirectories. Nothing in the script hardwires unit names — drop a new
+# unit directory there and it is found automatically.
+UNIT_DIRS="-Fu$REPO/units"
+for d in "$REPO"/units/*/; do
+  [ -d "$d" ] && UNIT_DIRS="$UNIT_DIRS -Fu${d%/}"
+done
+
 # -Tfreertos + -Wp<MCU> + -WP<IDF ver>; units/ via -Fu. Later options win, so
-# user-supplied options still override -XP/dirs. $FL_OPTS is deliberately
-# unquoted: it is a space-separated list of -Fl options built above.
+# user-supplied options still override -XP/dirs. $FL_OPTS/$LINK_EXTRA/
+# $UNIT_DIRS are deliberately unquoted: they are space-separated option lists
+# built above.
 exec "$PPC" -Tfreertos "$MCU" "-WP$IDF_VER" "-XP$BIN_PREFIX" $FPU_OPT \
-  "-Fu$REPO/units" "-Fu$REPO/units/espatomics" $FL_OPTS "$@"
+  $UNIT_DIRS $FL_OPTS $LINK_EXTRA "$@"

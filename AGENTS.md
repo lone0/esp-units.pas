@@ -19,9 +19,10 @@ workspace was removed *after* every one of its functions moved here.
 - **Two kinds of content** and only those:
   1. *test programs* — verify and demonstrate the compiler's abilities on
      ESP32 MCUs;
-  2. *utility units dedicated to ESP32* for programmer convenience
-     (`idfheap` = bridge to the IDF heap manager; `espatomics` = atomics
-     library for dual-core SoCs).
+  2. *utility units dedicated to ESP32* for programmer convenience:
+     one unit per subdirectory under `units/`; today an IDF-heap manager
+     bridge (`idfheap`) and an atomics library for dual-core SoCs (see
+     `units/README.md` for the current list).
 - **Automation scripts** (`scripts/`) work across multiple SoCs of the
   ESP32 family (esp32s3 in QEMU today, esp32s31 on the riscv32 path via
   `run-esp-emu.sh`): they build
@@ -38,12 +39,14 @@ workspace was removed *after* every one of its functions moved here.
   + a 4-patch series + a guarded rebuild setup. If a test here fails for a
   *compiler-internal* reason, that is a report-upstream topic, not a reason
   to enlarge this repo.
-- **`units/espatomics/` is FROZEN — user decision 2026-10-23:** no changes,
-  no tests written for it, in this repo. The directory is a verbatim copy
-  of the prototype used in its DESIGN (sources only; verified by checksum
-  at copy time). Document its API in `units/README.md`; do not edit
-  the sources; do not add `t_atomics_*` tests. Demand for unit changes goes
-  back to the user, not into this tree.
+- **One `units/` subdirectory (atomics) is FROZEN — user decision
+  2026-10-23:** no changes and no tests written for it in this repo, and its
+  unit / class / test names plus API documentation are **deferred to a
+  future version** of the repo docs. The directory is a verbatim copy of
+  the prototype used in its DESIGN (sources, checksum-verified at copy
+  time, plus that DESIGN page). Do not edit the sources; do not add tests for it;
+  demand for unit changes goes back to the user, not into this tree. The
+  repo's published docs refer to it only as "the frozen atomics suite".
 - **Docs have prescribed forms:**
   - *test programs*: `tests/README.md` explains, per test, purpose /
     expected outcome / pitfall.
@@ -58,11 +61,11 @@ workspace was removed *after* every one of its functions moved here.
 | Path | What it is |
 |---|---|
 | `units/idfheap.pp` | IDF-heap memory-manager bridge (**first in uses** rule); suite-exercised every run |
-| `units/espatomics/` | atomics unit pair **(frozen, §1)**: `espatomics.pas` (class helper `TInterlockedEsp` + `TAtomicFlag`, backend selection via `$I`: xtensa / rv32a / arm32 / stock), `freertosinterlocked.pas` (32-bit `TInterlocked` baseline), 6 `.inc`, `DESIGN.md` |
-| `units/README.md` | API docs + examples for both units |
+| `units/<unit-dir>/` | one subdirectory per unit; the frozen atomics suite (§1) there ships without API docs in this version: a small unit pair with 6 include fragments (4 per-architecture backends) and its own `DESIGN.md` |
+| `units/README.md` | API docs + examples for all units (describes the frozen atomics suite generically — API detail deferred, see §1) |
 | `tests/` | the suite: 33 renamed webtbs regressions (incl. compile-only `u_generics_pubsub_events.pas`) + `t_generics_collections_tstack` (moved demo) + `t_encoding_roundtrip` (TEncoding functional); subdir `thread-stubs/` (designed-loud failures, out of stats); `run-tests.sh`, `README.md` per-test docs. Self-authored ad-hoc probes are NOT committed (policy 2026-10-24). |
-| `examples/` | unit demonstrations, read-first/run-by-hand (`idfheap-smoke.pas` + `README.md` table); NOT part of the suite runner |
-| `scripts/build.sh` | cross-compile (`--soc esp32s3|esp32s31`; per-SoC table at top; env required, no path defaults) |
+| `examples/` | unit demonstrations, read-first/run-by-hand (`idfheap-smoke.pas`, `leibniz.pas`, `pispigot-lcd.pas` + `waveshare_lcd.c` + `README.md` table); NOT part of the suite runner |
+| `scripts/build.sh` | cross-compile (`--soc esp32s3|esp32s31`; per-SoC table at top; env required, no path defaults; `--c`/`--obj`/`--lib`/`--cflags` for C interop) |
 | `scripts/mkflash.sh` | elf/bin → flash image (bootloader/PT offsets from SDK sdkconfig; app @ 0x10000). Default padding = full flash size (QEMU needs 2/4/8/16 MB); `--tight` pads to the content end only |
 | `scripts/run-qemu.sh` | image → QEMU boot (esp32s3); esp32s31 is a placeholder → `run-esp-emu.sh` |
 | `scripts/run-esp-emu.sh` | image → esp-emu boot for esp32s31 (QEMU has no S31 machine yet) |
@@ -81,7 +84,7 @@ workspace was removed *after* every one of its functions moved here.
    via `xTaskCreatePinnedToCore` externals are the supported escape hatch
    (exact signatures and rules in §7). Do not weaken the Pascal stubs;
    do not use Pascal threadvars in real tasks.
-3. `espatomics` frozen (§1). New shared-state code in tests/units uses
+3. The atomics units are frozen (§1). New shared-state code in tests/units uses
    FreeRTOS primitives or idfheap-routed plain variables, never edits the
    frozen unit.
 4. Test naming: trunk-derived or moved-in tests keep `t_<topic>_<what>.pas`
@@ -93,7 +96,7 @@ workspace was removed *after* every one of its functions moved here.
    table AND one boot is verified; otherwise mark *designed for* with the
    missing prerequisite.
 6. Keep docs honest in both directions: don't claim suite coverage that
-   doesn't exist (e.g. currently none for espatomics), and don't hide
+   doesn't exist (e.g. currently none for the frozen atomics units), and don't hide
    designed failures as bugs.
 
 ## 4. Environment interfaces
@@ -123,8 +126,23 @@ about exactly that and the cure is `make all install` with a single flag set.
 when the project built `esp_libc`, its startup object needs picolibc's
 `__bufio_*`, so `…/picolibc/*/lib/<chip>` is placed **before** the other
 `-Fl` dirs automatically.
-A plain `make install` `fpc.cfg` therefore works; a hand-prepared cfg (like
-the 5.2.8 install) keeps working — duplicate `-Fl` lines are harmless.
+A plain `make install` `fpc.cfg` therefore works; a hand-prepared cfg keeps
+working — duplicate `-Fl` lines are harmless. The cfg is in fact **optional**
+(`build.sh` runs when `lib/fpc/etc/fpc.cfg` is absent): unit search paths come
+from `…/units/<target>-freertos`, and binutils/IDF come from
+`ESP_TOOLCHAIN_BIN`/`ESP_IDF_PATH` or `project_description.json`.
+
+**C interop (`--c` / `--obj` / `--lib` / `--cflags`).** A Pascal program that
+declares `cdecl; external` symbols is built in one command with the C sources:
+`scripts/build.sh prog.pas --c module.c`. `--c` compiles with the *derived*
+cross gcc using the command IDF recorded for the project's `main/` component in
+`build/compile_commands.json` (exact include order — a guessed
+`-I components/*/include` set picks up the unused Linux-compat component whose
+`bsd/sys/cdefs.h` breaks libc headers). `--obj` links prebuilt objects, `--lib`
+links archives by name (`lib<name>.a` searched in the derived `-Fl` dirs) or by
+path; archives go in with `-k--whole-archive … -k--no-whole-archive` because FPC
+passes `-k` arguments **before** its own objects. No C code or Makefile enters
+the repo, and the SDK project is untouched.
 
 **The SDK project must build what the RTL links.** The freertos binding
 (`espidf_<NNN>`) carries `{$linklib}` entries for a fixed archive list; a
@@ -179,7 +197,9 @@ one of them the compile-only unit, + the moved `t_generics_collections_tstack`
 demo + `t_encoding_roundtrip`). The floor is **all green**: 34 runtime PASS /
 0 CRASH / 0 COMPFAIL, with `u_generics_pubsub_events` COMPILE-ONLY (a unit —
 it builds but never boots). A full-suite green run is a per-toolchain
-milestone, not something the inventory alone guarantees. Add the three
+milestone, not something the inventory alone guarantees. **Last full green run:
+2026-10-28, ESP-IDF 6.1 toolchain with SPIRAM SDK (34 PASS + 1 COMPILE-ONLY);
+`examples/idfheap-smoke.pas` built and booted in the same session.** Add the three
 `thread-stubs/` designed outcomes (`cs ok`, `ESyncObjectException`,
 TThread-stub exception) and the `examples/` demonstration built+booted by
 hand (its output is listed in `examples/README.md`). If a regression fails
@@ -221,6 +241,9 @@ in the `-WP` unit and the venv on `PATH` are independent choices.
 - A multi-MB PSRAM alloc + checksum *test* program (the user asked for the
   example-level PSRAM demo, delivered 2026-10-24; a suite-grade test with a
   checksum over several MB in PSRAM is still unwritten).
+- `examples/pispigot-lcd.pas`: builds and boots (link path verified in QEMU,
+  exit 0), but the on-display rendering is **unverified** — QEMU models neither
+  the LCD nor I2C, so a `flash.sh` run on real hardware is still missing.
 
 ## 7. ESP32 programming knowledge for writing code in this repo
 
@@ -261,7 +284,7 @@ function xTaskCreatePinnedToCore(fn: TTaskFn; name: pchar; stackDepth: uint32;
   `RunError 232`) — pass state via the `param` pointer and queues.
 - `idfheap` (heap_caps layer) IS task-safe; containers/objects are NOT —
   share them only behind `xSemaphoreCreateMutex`/`xQueue*` or a
-  `TAtomicFlag`-style guarded window of your own.
+  or an atomic-flag-style guarded window of your own.
 - Exceptions in workers are unproven — workers fail via return values or
   queues, never by raising.
 - Exit discipline: end the program only after workers self-deleted

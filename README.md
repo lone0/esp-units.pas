@@ -14,18 +14,21 @@ It contains two kinds of things:
    threading contract (`tests/thread-stubs/`). `tests/run-tests.sh` compiles
    each one with the cross compiler and boots it in QEMU, classifying the
    result (`PASS` = clean boot, clean exit).
-2. **Utility units** — programmer conveniences dedicated to ESP32:
-   - [`units/idfheap.pp`](units/README.md) — bridge to the IDF heap
+2. **Utility units** — one subdirectory per unit under [`units/`](units/README.md),
+   programmer conveniences dedicated to ESP32:
+   - `idfheap` (`units/idfheap.pp`) — bridge to the IDF heap
      manager: all Pascal dynamic memory flows into the IDF pool
      (PSRAM-eligible once enabled) instead of a compiler-baked static block.
-   - [`units/espatomics/`](units/README.md) — atomic operations for
-     ESP32 dual-core (and other ESP family) SoCs:
-     `TInterlocked` baseline (missing from the freertos RTL),
-     `TInterlockedEsp` fetch/CAS/acquire-release via the chip's
-     compare-and-swap instruction, `TAtomicFlag` spin lock. Multi-SoC by
-     construction: an xtensa backend (S3/S2/classic), an RV32A backend
-     (C3/C6), an ARM32 backend, and a stock fallback; the active
-     backend is selected at compile time.
+   - an atomics unit pair — atomic operations for
+     ESP32 dual-core (and other ESP family) SoCs, shipping as a **frozen**
+     unit directory: an Interlocked-style baseline that the freertos RTL
+     lacks, fetch/CAS/acquire-release machine-level atomics on top of the
+     chip's compare-and-swap instruction, and an atomic spin lock.
+     Multi-SoC by construction: an xtensa backend (S3/S2/classic), an
+     RV32A backend (C3/C6), an ARM32 backend, and a stock fallback; the
+     active backend is selected at compile time.
+   Unit directories and APIs (including the frozen atomics directory) are
+   documented in [`units/README.md`](units/README.md).
 
 ## Quickstart
 
@@ -51,6 +54,18 @@ scripts/build.sh --soc esp32s31 examples/idfheap-smoke.pas
 scripts/run-esp-emu.sh examples/idfheap-smoke.elf
 ```
 
+A Pascal program that calls C needs no separate build step and no change to the
+IDF project: name the C sources on the same command line.
+
+```sh
+scripts/build.sh my-prog.pas --c my-module.c     # --obj / --lib also accepted
+```
+
+`--c` compiles with the derived cross gcc, reusing the compile command IDF
+recorded for the project's `main/` component (`build/compile_commands.json`), so
+the headers and chip flags match the rest of the build; the object is linked
+along with the Pascal one. See `AGENTS.md` §4 for the details.
+
 ## SoC support
 
 | SoC | Cores/ISA | State |
@@ -63,7 +78,7 @@ scripts/run-esp-emu.sh examples/idfheap-smoke.elf
 
 | Need | Env |
 |---|---|
-| FreePascal freertos cross toolchain | `ESP_FPC_ROOT` (point at the install for the SoC you are building); no `fpc.cfg` editing needed — `build.sh` derives the binutils prefix, FPU mode, libc scheme and the IDF link closure |
+| FreePascal freertos cross toolchain | `ESP_FPC_ROOT` (point at the install for the SoC you are building); no `fpc.cfg` editing needed — `build.sh` derives the binutils prefix, FPU mode, libc scheme and the IDF link closure, and works even when the install has no `fpc.cfg` at all |
 | IDF version for `-WP` | `ESP_IDF_VERSION` (no default) |
 | Built ESP-IDF project | `ESP32_SDK_PROJECT` — its app must `REQUIRES` the components the freertos RTL link-lists (see `AGENTS.md` §4), or the archives simply do not exist |
 | ESP-IDF / esptool python | `ESP_IDF_PATH` and/or `ESP_PYTHON_BIN` (also discoverable from `fpc.cfg` `-Fl` for IDF root + binutils); esptool 4.x and 5.x CLI spellings are both handled |
@@ -74,8 +89,8 @@ scripts/run-esp-emu.sh examples/idfheap-smoke.elf
 
 | Path | Content |
 |---|---|
-| `units/README.md` | **API documentation for the utility units** (usage, examples, problems resolved) |
-| `units/espatomics/DESIGN.md` | backend-selection design rationale (kept with its sources) |
+| `units/` | **the utility units** — one subdirectory per unit, APIs in `units/README.md` |
+| `units/*/DESIGN.md` | backend-selection design rationale (kept with its unit's sources) |
 | `tests/README.md` | **per-test documentation**: purpose, expected outcome, pitfalls |
 | `tests/run-tests.sh` | the suite runner |
 | `examples/` | **example programs demonstrating units** (read-first, run-by-hand; `examples/README.md` table) |
