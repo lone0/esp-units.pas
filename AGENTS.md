@@ -165,8 +165,8 @@ widening the project's `REQUIRES` is.
 
 | Variable | Required? | Note |
 |---|---|---|
-| `ESP_FPC_ROOT` | yes | fpc-cross install for this build; `--soc` selects `ppcrossxtensa` / `ppcrossriscv32` inside it |
-| `ESP_IDF_VERSION` | yes | passed as `-WP…` (e.g. `6.1`); no default |
+| `ESP_FPC_ROOT` | yes | fpc-cross install for this build; `--soc` selects `ppcrossxtensa` / `ppcrossrv32` inside it |
+| `ESP_IDF_VERSION` | no | passed as `-WP…` (e.g. `6.1`); default `6.1` |
 | `ESP32_SDK_PROJECT` | yes | built ESP-IDF project (bootloader/PT/sdkconfig / SPIRAM libs) |
 | `ESP_IDF_PATH` | if no `ESP_PYTHON_BIN` / no `-Fl` hit | ESP-IDF root |
 | `ESP_TOOLCHAIN_BIN` | optional | else from `fpc.cfg` `-Fl` …/`<toolchain>`/… |

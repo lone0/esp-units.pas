@@ -11,11 +11,11 @@
 #
 # Required environment:
 #   ESP_FPC_ROOT       fpc-cross install for *this* build — tree with
-#                      lib/fpc/<ver>/ppcross{xtensa|riscv32} (fpc.cfg optional).
-#                      Point it at the xtensa tree for esp32s3, the riscv32 tree
-#                      for esp32s31 (or any future SoC). --soc only selects the
-#                      binary name + MCU flags inside that root.
-#   ESP_IDF_VERSION    IDF version string for -WP (e.g. 6.1)
+#                      lib/fpc/<ver>/ppcrossxtensa and/or ppcrossrv32
+#                      (fpc.cfg optional). Point it at the tree holding the
+#                      compiler --soc needs (or any future SoC). --soc only
+#                      selects the binary name + MCU flags inside that root.
+#   ESP_IDF_VERSION    IDF version string for -WP (default: 6.1)
 #   ESP32_SDK_PROJECT  built ESP-IDF project (bootloader, sdkconfig, libesp_psram.a)
 #
 # Optional (else discovered from the toolchain fpc.cfg -Fl lines / IDF_PATH):
@@ -36,12 +36,12 @@ Cross-build a Pascal program for an ESP32-family SoC.
 Required environment (this script never guesses host paths):
   ESP_FPC_ROOT       fpc-cross install for THIS build.
                        esp32s3  -> the tree holding lib/fpc/<ver>/ppcrossxtensa
-                       esp32s31 -> the tree holding lib/fpc/<ver>/ppcrossriscv32
+                       esp32s31 -> the tree holding lib/fpc/<ver>/ppcrossrv32
                      e.g.  ESP_FPC_ROOT=$HOME/fpc-cross/fpc-xtensa
                      lib/fpc/etc/fpc.cfg is optional: unit paths, binutils prefix,
                      link closure, FPU mode and libc scheme are all derived here.
   ESP_IDF_VERSION    version string passed as -WP; selects the espidf_<NNN> unit
-                     e.g.  ESP_IDF_VERSION=6.1
+                     default: 6.1
   ESP32_SDK_PROJECT  a built ESP-IDF project (idf.py build already run):
                      build/bootloader/bootloader.bin, build/partition_table/,
                      build/config/sdkconfig.h (+ build/esp-idf/esp_psram/ when
@@ -69,8 +69,9 @@ Derived automatically (no hand-edited fpc.cfg needed):
   binutils dir +    <- the SDK project's build/project_description.json
   IDF root             ("c_compiler" / "idf_path") when neither the env nor
                        the toolchain fpc.cfg supplies them
-  FPU mode          <- ppudump on the installed RTL's system.ppu, passed as
-                       -Cfsoft/-Cfhard so it always matches the units; the
+  FPU mode          <- (xtensa) ppudump on the installed RTL's system.ppu,
+                       passed as -Cfsoft/-Cfhard so it always matches the
+                       units; riscv32's float ABI is fixed -Cprv32imafc. The
                        package units are probed too, and a half-reinstalled
                        toolchain (RTL rebuilt, packages stale) is reported as
                        such instead of failing later with "Can't find unit"
@@ -89,7 +90,7 @@ Derived automatically (no hand-edited fpc.cfg needed):
 
 Options:
   --soc esp32s3      xtensa lx7 (default): ppcrossxtensa, -WpESP32S3
-  --soc esp32s31     riscv32: ppcrossriscv32, -WpESP32S31
+  --soc esp32s31     riscv32: ppcrossrv32, -Cprv32imafc, -WpESP32S31
   [fpc options]      forwarded to the compiler; later options win
                      (e.g. -Ch1024 overrides a -Ch from fpc.cfg)
   --help             show this help
@@ -105,7 +106,7 @@ C interop (a Pascal program calling C; details in ../AGENTS.md §4):
   --cflags "…"       extra C flags appended to the recorded IDF command
 
 Examples:
-  export ESP_FPC_ROOT=... ESP_IDF_VERSION=6.1 ESP32_SDK_PROJECT=...
+  export ESP_FPC_ROOT=... ESP32_SDK_PROJECT=...
   scripts/build.sh examples/idfheap-smoke.pas
 
   # switch SoC: point ESP_FPC_ROOT (and the SDK project) at the riscv32 pair
@@ -128,7 +129,7 @@ need_env() {
 }
 
 find_ppc() {
-  # $1 = FPC_ROOT, $2 = binary name (ppcrossxtensa | ppcrossriscv32)
+  # $1 = FPC_ROOT, $2 = binary name (ppcrossxtensa | ppcrossrv32)
   root=$1
   name=$2
   found=
@@ -184,23 +185,31 @@ set +f
 }
 
 need_env ESP_FPC_ROOT
-need_env ESP_IDF_VERSION
 need_env ESP32_SDK_PROJECT
 FPC_ROOT=$ESP_FPC_ROOT
-IDF_VER=$ESP_IDF_VERSION
+IDF_VER=${ESP_IDF_VERSION:-6.1}
 PRJ=$ESP32_SDK_PROJECT
 
-# --- per-SoC table: MCU / compiler binary / binutils family only ------------
+# --- per-SoC table -----------------------------------------------------------
+# PPC_NAME is the binary the FPC makefile actually installs (riscv32 ->
+# ppcrossrv32, NOT ppcrossriscv32); TARGET_CPU names the units/<target>-freertos
+# dir and gates the -Cf probe below. ABI_OPT carries what the RTL was built
+# with that cannot be probed: riscv32 ILP32F = -Cprv32imafc (xtensa's FPU mode
+# is probed from the units instead).
 case "$soc" in
   esp32s3)
     PPC_NAME=ppcrossxtensa
+    TARGET_CPU=xtensa
     MCU=-WpESP32S3
+    ABI_OPT=
     ESPTOOL_CHIP=esp32s3
     TOOLCHAIN_NAME=xtensa-esp-elf
     ;;
   esp32s31)
-    PPC_NAME=ppcrossriscv32
+    PPC_NAME=ppcrossrv32
+    TARGET_CPU=riscv32
     MCU=-WpESP32S31
+    ABI_OPT=-Cprv32imafc
     ESPTOOL_CHIP=esp32s31
     TOOLCHAIN_NAME=riscv32-esp-elf
     ;;
@@ -348,14 +357,15 @@ fi
 # about it (the compiler's built-in default may differ from how the RTL was
 # built -> "Trying to use a unit which was compiled with a different FPU
 # mode"). Ask the RTL itself via ppudump when that tool is available.
+# -Cfsoft/-Cfhard exist on xtensa only; riscv32's float ABI is fixed above.
 FPU_OPT=
 TARGET_UNITS=
-for u in "$FPC_ROOT"/lib/fpc/*/units/"${PPC_NAME#ppcross}"-freertos/rtl/system.ppu; do
+for u in "$FPC_ROOT"/lib/fpc/*/units/"$TARGET_CPU"-freertos/rtl/system.ppu; do
   [ -f "$u" ] && { TARGET_UNITS=$u; break; }
 done
 PPUDUMP=$(ls "$FPC_ROOT"/bin/ppudump "$FPC_ROOT"/lib/fpc/*/ppudump 2>/dev/null | head -1)
 [ -n "$PPUDUMP" ] || PPUDUMP=$(command -v ppudump 2>/dev/null || true)
-if [ -n "$PPUDUMP" ] && [ -x "$PPUDUMP" ] && [ -f "$TARGET_UNITS" ]; then
+if [ "$TARGET_CPU" = xtensa ] && [ -n "$PPUDUMP" ] && [ -x "$PPUDUMP" ] && [ -f "$TARGET_UNITS" ]; then
   if "$PPUDUMP" "$TARGET_UNITS" 2>/dev/null | grep -q 'Unit flags.*fpu_emulation_on'; then
     FPU_OPT=-Cfsoft
   elif "$PPUDUMP" "$TARGET_UNITS" 2>/dev/null | grep -q 'Unit flags'; then
@@ -507,7 +517,7 @@ fi
 # install may have none), but system / sysutils / classes / Generics.* still
 # have to be found. FPC expands the '*' itself, so it stays a single argument.
 UNIT_ROOT=
-for d in "$FPC_ROOT"/lib/fpc/*/units/"${PPC_NAME#ppcross}"-freertos; do
+for d in "$FPC_ROOT"/lib/fpc/*/units/"$TARGET_CPU"-freertos; do
   [ -d "$d" ] && { UNIT_ROOT=$d; break; }
 done
 if [ -n "$UNIT_ROOT" ]; then
@@ -526,5 +536,5 @@ done
 # user-supplied options still override -XP/dirs. $FL_OPTS/$LINK_EXTRA/
 # $UNIT_DIRS are deliberately unquoted: they are space-separated option lists
 # built above.
-exec "$PPC" -Tfreertos "$MCU" "-WP$IDF_VER" "-XP$BIN_PREFIX" $FPU_OPT \
+exec "$PPC" -Tfreertos "$MCU" "-WP$IDF_VER" "-XP$BIN_PREFIX" $ABI_OPT $FPU_OPT \
   $UNIT_DIRS $FL_OPTS $LINK_EXTRA "$@"

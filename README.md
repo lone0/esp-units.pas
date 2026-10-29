@@ -41,7 +41,7 @@ export ESP_IDF_PATH=/path/to/esp-idf       # or set ESP_PYTHON_BIN
 # optional: ESP_TOOLCHAIN_BIN, ESP_PYTHON_BIN, ESP_QEMU, ESP_EMU
 
 # ESP_FPC_ROOT = install for *this* build. Switch it when you switch SoC.
-# --soc only selects ppcrossxtensa vs ppcrossriscv32 + MCU flags inside that root.
+# --soc only selects ppcrossxtensa vs ppcrossrv32 + MCU flags inside that root.
 
 export ESP_FPC_ROOT=/path/to/fpc-cross-xtensa
 export ESP32_SDK_PROJECT=/path/to/built-idf-project-for-s3
@@ -79,7 +79,7 @@ along with the Pascal one. See `AGENTS.md` §4 for the details.
 | Need | Env |
 |---|---|
 | FreePascal freertos cross toolchain | `ESP_FPC_ROOT` (point at the install for the SoC you are building); no `fpc.cfg` editing needed — `build.sh` derives the binutils prefix, FPU mode, libc scheme and the IDF link closure, and works even when the install has no `fpc.cfg` at all |
-| IDF version for `-WP` | `ESP_IDF_VERSION` (no default) |
+| IDF version for `-WP` | `ESP_IDF_VERSION` (default `6.1`) |
 | Built ESP-IDF project | `ESP32_SDK_PROJECT` — its app must `REQUIRES` the components the freertos RTL link-lists (see `AGENTS.md` §4), or the archives simply do not exist |
 | ESP-IDF / esptool python | `ESP_IDF_PATH` and/or `ESP_PYTHON_BIN` (also discoverable from `fpc.cfg` `-Fl` for IDF root + binutils); esptool 4.x and 5.x CLI spellings are both handled |
 | Espressif QEMU | `ESP_QEMU` or `qemu-system-xtensa` on `PATH` |
