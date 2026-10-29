@@ -13,9 +13,31 @@ const
   len = 10 * n div 3;  { 数组长度，约为位数的 3.3 倍 }
 
 var
-  i, j, k, q, x, nines, predigit: longint;
+  j, k, q, nines, predigit: longint;
   a: array[1..len] of longint;
   t0, t1: int64;
+
+{ Inner step in its own function so nines and predigit do not occupy
+  the call8-preserved registers. The array is walked with a pointer and
+  the divisor steps by -2. }
+function SpigotStep: longint;
+var
+  i, q, x, divisor: longint;
+  p: PLongInt;
+begin
+  q := 0;
+  p := @a[len];
+  divisor := 2 * len - 1;
+  for i := len downto 1 do
+  begin
+    x := 10 * p^ + q * i;
+    p^ := x mod divisor;
+    q := x div divisor;
+    Dec(p);
+    Dec(divisor, 2);
+  end;
+  SpigotStep := q;
+end;
 
 begin
   if waveshare_lcd_console_init <> 0 then
@@ -34,15 +56,7 @@ begin
 
   for j := 1 to n do
   begin
-    q := 0;
-
-    { 从右向左进行核心计算 }
-    for i := len downto 1 do
-    begin
-      x := 10 * a[i] + q * i;
-      a[i] := x mod (2 * i - 1);
-      q := x div (2 * i - 1);
-    end;
+    q := SpigotStep;
 
     a[1] := q mod 10;
     q := q div 10;
