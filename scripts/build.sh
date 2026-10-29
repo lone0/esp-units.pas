@@ -309,23 +309,38 @@ done
 #    link order decides: esp_libc's startup object references picolibc's
 #    __bufio_* helpers, which only picolibc's libc.a provides. When the SDK
 #    project built esp_libc, that dir therefore has to come first.
+#    RISC-V ILP32F (esp32s31) keeps picolibc under the multilib path
+#    …/rv32imafc_*/ilp32f, not …/lib/<chip>.
 if [ -d "$PRJ/build/esp-idf/esp_libc" ]; then
-  for d in "$TC_ROOT"/picolibc/*/lib/"$ESPTOOL_CHIP"; do
+  for d in "$TC_ROOT"/picolibc/*/lib/"$ESPTOOL_CHIP" \
+           "$TC_ROOT"/picolibc/*/lib/rv32imafc*/ilp32f; do
     [ -d "$d" ] || continue
     has_libs "$d" || continue
     case " $FL_OPTS " in *" -Fl$d "*) continue;; esac
     FL_OPTS="-Fl$d $FL_OPTS"
   done
 fi
+# Matching libgcc multilib for ILP32F (soft-float ilp32 would be wrong).
+for d in "$TC_ROOT"/lib/gcc/*/*/rv32imafc*/ilp32f; do
+  add_fl "$d"
+done
 
 # Cross binutils prefix (<prefix>gcc in the binutils dir), so a bare install
 # whose fpc.cfg still says -XP$FPCTARGET- (-> "xtensa-freertos-as") works.
+# Xtensa installs use chip-qualified names (xtensa-esp32s3-elf-gcc). The
+# Espressif RISC-V install is a single triple (riscv32-esp-elf-gcc) shared by
+# every RV chip — fall back to that when no *-<chip>-*-gcc exists.
 BIN_PREFIX=
 for c in "$TC_BIN"/*-"$ESPTOOL_CHIP"-*gcc; do
   [ -x "$c" ] && { BIN_PREFIX=$(basename "$c" gcc); break; }
 done
+if [ -z "$BIN_PREFIX" ]; then
+  for c in "$TC_BIN"/riscv32-esp-elf-gcc "$TC_BIN"/*-esp-elf-gcc; do
+    [ -x "$c" ] && { BIN_PREFIX=$(basename "$c" gcc); break; }
+  done
+fi
 [ -n "$BIN_PREFIX" ] || {
-  echo "error: ESP_TOOLCHAIN_BIN has no *-$ESPTOOL_CHIP-*-gcc; it does not match --soc $soc" >&2
+  echo "error: ESP_TOOLCHAIN_BIN has no *-$ESPTOOL_CHIP-*-gcc (or riscv32-esp-elf-gcc); it does not match --soc $soc" >&2
   exit 1
 }
 
