@@ -144,11 +144,14 @@ path; archives go in with `-k--whole-archive … -k--no-whole-archive` because F
 passes `-k` arguments **before** its own objects. No C code or Makefile enters
 the repo, and the SDK project is untouched.
 
-**The SDK project must build what the RTL links.** The freertos binding
-(`espidf_<NNN>`) carries `{$linklib}` entries for a fixed archive list; a
-component that the app never required is never built, so its `.a` does not
-exist and the link fails with `cannot find lib….a`. Minimal working
-`main/CMakeLists.txt` closure for a Pascal app:
+**The SDK project must build what the RTL and build.sh link.** The freertos
+binding (`espidf_<NNN>`) carries `{$linklib}` entries for a fixed,
+config-independent archive list; `scripts/build.sh` additionally links
+`libesp_psram.a` (SPIRAM sdkconfig) and `libespcoredump.a` (archive
+present) whole-archive from the same project. A component that the app
+never required is never built, so its `.a` does not exist and the link
+fails with `cannot find lib….a`. Minimal working `main/CMakeLists.txt`
+closure for a Pascal app:
 
 ```cmake
 idf_component_register(SRCS "hello_world_main.c"
@@ -222,8 +225,10 @@ in the `-WP` unit and the venv on `PATH` are independent choices.
 **SPIRAM variant (enabled in `blink-s3` since 2026-10-24, verified
 2026-10-24).** Same commands; expected differences:
 - `build.sh` auto-detects `CONFIG_SPIRAM 1` in the SDK project's
-  `sdkconfig.h` and adds `-dESPSDK_SPIRAM -Fl…/esp_psram` (see
-  `units/README.md` for why + traps).
+  `sdkconfig.h` and links `libesp_psram.a` whole-archive from the project's
+  build tree; `libespcoredump.a` is linked the same way whenever the
+  project built it. Identical rule for esp32s3 and esp32s31 (see
+  `units/README.md` for the mechanics).
 - the example then prints `-> PSRAM` for *every* line and a ~32 MB heap
   (`IDF pool: … size=~33591564`); even the 4096-byte `GetMem` is PSRAM —
   IDF reserves 32 KiB internal for cap-flagged allocations
@@ -335,9 +340,11 @@ DMA buffers stay internal by default.
   without it the plain `-M <machine> -drive …,if=mtd` boot is unchanged.
   QEMU never exits after the program halts — keep the `timeout` cap
   (30 s for the PSRAM boot, which takes a few more seconds to initialize).
-- **The PSRAM link closure lives in FPC-land, not QEMU-land** (see
-  `units/README.md`): SPIRAM links need a used unit with
-  `{$linklib esp_psram,static}` — command-line `-k-l<name>` does not work.
+- **The SPIRAM link closure lives in build.sh, not QEMU-land** (see
+  `units/README.md`): the script whole-archives `libesp_psram.a` (and
+  `libespcoredump.a` when the project built it) from the SDK project —
+  a command-line `-k-l<name>` does not work (it is scanned before the
+  references exist).
 - 15 s wall-clock cap per boot is plenty for every current suite program.
 - Guru/panic text appears verbatim in the serial log; symbolize crashes with
   `xtensa-esp32s3-elf-addr2line` on the program's `.elf` (espressif toolchain

@@ -69,29 +69,31 @@ to pin `heapmgr` → `idfheap` → `sysutils` → `classes` ordering.
   freed through this manager — mixing the two managers' pointers is not
   supported by design, and nothing in this repo does it.
 
-**PSRAM SDK link closure (introduced 2026-10-24).** When the external SDK
-project is built with `CONFIG_SPIRAM=y`, IDF's startup/flash archives gain
-references to `esp_psram_*` symbols — and the link then needs
-`libesp_psram.a`. The mechanics, verified by experiment:
+**SDK-config-dependent link closure (esp_psram / espcoredump).** IDF
+archives whose existence depends on the sdkconfig are linked by
+`scripts/build.sh`, keyed on the SDK project's own build output — the
+identical rule for both SoCs (replaces the 2026-10-24 `-dESPSDK_SPIRAM` +
+conditional-`{$linklib}`-in-idfheap mechanism, since 2026-10-31):
 
-- FPC only injects an extra archive for a `{$linklib <name>,static}` found
-  in a **used** unit. A command-line `-k-l<name>` also reaches `ld`, but is
-  scanned *before* the IDF object list pulls the `esp_psram_*` references —
-  a static archive is only scanned once — so it silently links nothing.
-- The comma suffix is **mandatory**: `{$linklib esp_psram}` without
-  `,static` does not register at all.
-- `idfheap.pp` therefore carries
-  `{$ifdef ESPSDK_SPIRAM} {$linklib esp_psram,static} {$endif}`, and
-  `scripts/build.sh` auto-detects the SPIRAM state from
-  `$ESP32_SDK_PROJECT/build/config/sdkconfig.h`: it passes
-  `-dESPSDK_SPIRAM` + `-Fl$PRJ/build/esp-idf/esp_psram` on a SPIRAM build,
-  and nothing on a non-SPIRAM build (where the archive may not even exist).
-- **ppu staleness trap:** FPC tracks source timestamps, not conditional
-  defines — a `idfheap.ppu` compiled without `-dESPSDK_SPIRAM` would
-  silently keep failing links after the SDK flips to SPIRAM. `build.sh`
-  wipes `units/idfheap.ppu/.o` whenever the detected state differs from the
-  stamp file `units/.idfheap-spiram-state`. If you build by hand instead of
-  via `build.sh`, delete the ppu yourself after changing the define state.
+- `libesp_psram.a` when the project was built with `CONFIG_SPIRAM=y`: its
+  startup/heap archives then reference `esp_psram_*` symbols. Detected from
+  `build/config/sdkconfig.h`, with a hard error if the archive is missing.
+- `libespcoredump.a` whenever the project built it: `libesp_system.a`'s
+  panic handling references `esp_core_dump_write` then. Detected by archive
+  presence, not config keys — a coredump-disabled project can still carry
+  `CONFIG_ESP_COREDUMP_ENABLE_TO_NONE=y`.
+- Mechanics (verified by experiment, and the reason neither the RTL nor any
+  repo unit — `idfheap` included — carries a `{$linklib}` for these): FPC
+  only injects an archive for a `{$linklib <name>,static}` found in a
+  **used** unit, and it hands `-k` arguments to the linker *before* its own
+  objects. A plain `-k-l<name>` or bare archive path is scanned *before*
+  the IDF objects pull the references — a static archive is only scanned
+  once — so it silently links nothing. The script therefore wraps each
+  archive in `-k--whole-archive … -k--no-whole-archive` (a few KB each).
+  The comma suffix stays **mandatory** for hand-written unit `{$linklib}`s:
+  without `,static` the directive does not register at all.
+- Hand links without `build.sh`: declare the archive in an application
+  unit (see above) or pass the whole-archive `-k` triple yourself.
 - End-to-end proven with the QEMU octal-PSRAM boot (see the repo AGENTS.md
   §8): IDF maps the emulated 32 MB PSRAM and *every* Pascal allocation then
   comes from it (see `examples/idfheap-smoke.pas`).

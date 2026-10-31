@@ -16,7 +16,9 @@
 #                      compiler --soc needs (or any future SoC). --soc only
 #                      selects the binary name + MCU flags inside that root.
 #   ESP_IDF_VERSION    IDF version string for -WP (default: 6.1)
-#   ESP32_SDK_PROJECT  built ESP-IDF project (bootloader, sdkconfig, libesp_psram.a)
+#   ESP32_SDK_PROJECT  built ESP-IDF project (bootloader, sdkconfig; the
+#                      script links libesp_psram.a / libespcoredump.a from it
+#                      when the project provides them)
 #
 # Optional (else discovered from the toolchain fpc.cfg -Fl lines / IDF_PATH):
 #   ESP_IDF_PATH       ESP-IDF root (esptool.py)
@@ -44,14 +46,17 @@ Required environment (this script never guesses host paths):
                      default: 6.1
   ESP32_SDK_PROJECT  a built ESP-IDF project (idf.py build already run):
                      build/bootloader/bootloader.bin, build/partition_table/,
-                     build/config/sdkconfig.h (+ build/esp-idf/esp_psram/ when
-                     CONFIG_SPIRAM is on)
+                     build/config/sdkconfig.h. The script additionally links
+                     libesp_psram.a (CONFIG_SPIRAM on) and libespcoredump.a
+                     (archive present) whole-archive from this project's
+                     build tree, so those components must be in the build
+                     when the features are enabled
                      e.g.  ESP32_SDK_PROJECT=$HOME/esp/my-idf-project
                      It must also build every component the freertos RTL
                      binding link-lists, because an unbuilt component leaves
                      no archive to link (add them to the app's REQUIRES):
                        esp_phy esp_coex driver vfs mbedtls esp_driver_uart
-                       esp_driver_usb_serial_jtag   [+ esp_psram, esp_ringbuf]
+                       esp_driver_usb_serial_jtag esp_ringbuf
 
 Optional (default: discovered from the toolchain's own fpc.cfg -Fl lines,
 else from the SDK project's build/project_description.json):
@@ -493,24 +498,32 @@ for l in $C_LIBS; do
 done
 
 
-# --- SPIRAM link closure ----------------------------------------------------
-# When the SDK project was built WITH CONFIG_SPIRAM, its esp_system/freertos
-# archives gain references to esp_psram_* symbols (libesp_psram.a). FPC only
-# injects an extra archive when a USED unit carries {$linklib <n>,static}.
-# idfheap carries {$linklib esp_psram,static} under -dESPSDK_SPIRAM.
+# --- SDK-config-dependent link closure (esp_psram, espcoredump) --------------
+# The RTL's {$linklib} set carries no SDK-config-dependent archives. The ones
+# whose existence depends on the sdkconfig are linked here, keyed on the SDK
+# project's own build output -- the identical rule for both SoCs:
+#   - libesp_psram.a when the project was built WITH CONFIG_SPIRAM: its
+#     startup/heap archives then reference esp_psram_* symbols;
+#   - libespcoredump.a whenever the project built it (CONFIG_ESP_COREDUMP_
+#     ENABLE): libesp_system.a's panic handling references esp_core_dump_
+#     write then. Detected by archive presence, not config keys -- a
+#     coredump-disabled project can still carry ENABLE_TO_NONE=y.
+# FPC only injects an archive for a {$linklib} in a USED unit, and it hands
+# -k arguments to the linker *before* its own objects, so a plain archive
+# reference would be scanned before anything needs it (a static archive is
+# only scanned once): pull every member in instead -- a few KB each.
 CFGH=$PRJ/build/config/sdkconfig.h
 if grep -aq '^#define CONFIG_SPIRAM 1' "$CFGH" 2>/dev/null; then
-  PSRAM_LIBDIR=$PRJ/build/esp-idf/esp_psram
-  [ -f "$PSRAM_LIBDIR/libesp_psram.a" ] || {
-    echo "SPIRAM sdkconfig detected in $CFGH but $PSRAM_LIBDIR/libesp_psram.a is missing - rebuild the SDK project first" >&2
+  PSRAM_A=$PRJ/build/esp-idf/esp_psram/libesp_psram.a
+  [ -f "$PSRAM_A" ] || {
+    echo "SPIRAM sdkconfig detected in $CFGH but $PSRAM_A is missing - rebuild the SDK project first" >&2
     exit 1
   }
-  STAMP=$REPO/units/.idfheap-spiram-state-$soc
-  if [ ! -f "$STAMP" ] || [ "$(cat "$STAMP" 2>/dev/null)" != "$PSRAM_LIBDIR" ]; then
-    rm -f "$REPO/units/idfheap.ppu" "$REPO/units/idfheap.o"
-    printf '%s\n' "$PSRAM_LIBDIR" > "$STAMP"
-  fi
-  set -- -dESPSDK_SPIRAM "-Fl$PSRAM_LIBDIR" "$@"
+  LINK_EXTRA="$LINK_EXTRA -k--whole-archive -k$PSRAM_A -k--no-whole-archive"
+fi
+COREDUMP_A=$PRJ/build/esp-idf/espcoredump/libespcoredump.a
+if [ -f "$COREDUMP_A" ]; then
+  LINK_EXTRA="$LINK_EXTRA -k--whole-archive -k$COREDUMP_A -k--no-whole-archive"
 fi
 
 # RTL/package unit paths, derived: the cfg is optional (a bare or mid-rebuild

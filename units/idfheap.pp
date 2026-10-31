@@ -2,19 +2,6 @@ unit idfheap;
 
 {$mode objfpc}{$H+}
 
-{ PSRAM SDK closure: when the ESP-IDF project is built WITH CONFIG_SPIRAM,
-  its startup/flash archives reference esp_psram_* symbols which live in
-  libesp_psram.a. FPC only adds an archive to the link when a USED unit
-  carries {$linklib}; this directive is compiled in only when build.sh
-  detects the SPIRAM sdkconfig and passes -dESPSDK_SPIRAM (plus the
-  -Fl path of build/esp-idf/esp_psram). The ",static" suffix is REQUIRED:
-  without it the directive silently does not register. On a non-SPIRAM
-  project the define is absent and even linking against the archive
-  would be wrong (it may not exist), so both halves are conditional. }
-{$ifdef ESPSDK_SPIRAM}
-{$linklib esp_psram,static}
-{$endif}
-
 { Installs an IDF heap_caps_*-backed TMemoryManager at unit initialization -
   the production form of the manager routing demonstrated by probe-idfmm.
 
