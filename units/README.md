@@ -109,16 +109,19 @@ program exercises it implicitly (it is first in `uses` everywhere); the pool
 used/free/size numbers it prints through `GetHeapStatus` are real
 `heap_caps_get_info` figures. Per-test details: `tests/README.md`.
 
-## A frozen atomics suite under `units/`
+## `espatomics` — ESP.Atomics sub-project
 
-A second unit suite (atomics for ESP-family SoCs, dual-core safe: machine-
-locked operations with compile-time backend selection for Xtensa / RV32A /
-ARM32 and a stock fallback) is present as a **frozen** unit directory (repo
-`AGENTS.md` §1) and ships in this version **without API documentation or
-tests**: unit names, class APIs and per-unit docs are reserved for a future
-version. It is maintained-verified as-is (compiled + hardware-verified in the
-sibling prototype from which it was copied verbatim); changes and tests for
-it belong to the upstream prototype, not this tree.
+Self-contained under [`espatomics/`](./espatomics/):
+
+| Doc | Content |
+| --- | --- |
+| [`espatomics/REQUIREMENTS.md`](./espatomics/REQUIREMENTS.md) | Constraints + problem examples |
+| [`espatomics/DESIGN.md`](./espatomics/DESIGN.md) | Architecture / routing matrix |
+| [`espatomics/IMPLEMENTATION.md`](./espatomics/IMPLEMENTATION.md) | File map, backends, how to extend |
+| [`espatomics/AGENTS.md`](./espatomics/AGENTS.md) | Agent rules for this sub-project |
+
+Entry unit: `espatomics.pas` (class helper on `TInterlocked` + `TAtomicFlag`).
+FreeRTOS builds also need `freertosinterlocked.pas` for the 32-bit baseline.
 
 ---
 
@@ -130,7 +133,7 @@ Where to look for what:
 
 | Directory | Content |
 |---|---|
-| `units/` | the bridge to the IDF memory manager (`idfheap`) and a frozen atomics suite (API detail reserved for a future version) |
-| `units/<unit-dir>/DESIGN.md` | kept with its unit's sources; backend-selection rationale |
+| `units/` | `idfheap` + self-contained `espatomics/` sub-project |
+| `units/espatomics/` | ESP.Atomics docs + sources (see its `AGENTS.md`) |
 | `tests/` | compiler verification + demonstration programs (`tests/README.md` per test) |
 | `scripts/` | build / QEMU / flash automation, SoC-parameterized |

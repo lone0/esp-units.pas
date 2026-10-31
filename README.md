@@ -19,16 +19,13 @@ It contains two kinds of things:
    - `idfheap` (`units/idfheap.pp`) — bridge to the IDF heap
      manager: all Pascal dynamic memory flows into the IDF pool
      (PSRAM-eligible once enabled) instead of a compiler-baked static block.
-   - an atomics unit pair — atomic operations for
-     ESP32 dual-core (and other ESP family) SoCs, shipping as a **frozen**
-     unit directory: an Interlocked-style baseline that the freertos RTL
-     lacks, fetch/CAS/acquire-release machine-level atomics on top of the
-     chip's compare-and-swap instruction, and an atomic spin lock.
-     Multi-SoC by construction: an xtensa backend (S3/S2/classic), an
-     RV32A backend (C3/C6), an ARM32 backend, and a stock fallback; the
-     active backend is selected at compile time.
-   Unit directories and APIs (including the frozen atomics directory) are
-   documented in [`units/README.md`](units/README.md).
+   - [`units/espatomics/`](units/espatomics/) — self-contained ESP.Atomics
+     sub-project: Interlocked-style baseline the freertos RTL lacks,
+     fetch/CAS/acquire-release atomics, and `TAtomicFlag`, with xtensa /
+     RV32A / ARM32 backends and a stock fallback. Docs live in that
+     directory (`REQUIREMENTS` / `DESIGN` / `IMPLEMENTATION` / `AGENTS`).
+   Unit APIs are documented in [`units/README.md`](units/README.md);
+   atomics detail is only under `units/espatomics/`.
 
 ## Quickstart
 
