@@ -1,0 +1,27 @@
+[cap] attached /dev/ttyACM0
+litmus: six-family suite on ESP32-S31
+cores=2 rounds-per-variant=200000 variants=20
+holding 12s for the DTR window
+=== go ===
+variant=sb-bare forbidden=290
+  ^ VIOLATION
+variant=sb-acqrel forbidden=0
+variant=sb-exch-acqrel forbidden=0
+variant=sb-exch-seqcst forbidden=0
+variant=sb-scfence forbidden=0
+variant=mp-bare forbidden=0
+variant=mp-acqrel forbidden=0
+variant=mp-scfence forbidden=0
+variant=lb-bare forbidden=0
+variant=lb-acqrel forbidden=0
+variant=lb-scfence forbidden=0
+variant=wrc-bare forbidden=0
+variant=wrc-acqrel forbidden=0
+variant=wrc-scfence forbidden=0
+variant=isa2-bare forbidden=0
+variant=isa2-acqrel forbidden=0
+variant=isa2-scfence forbidden=0
+variant=iriw-bare forbidden=0
+variant=iriw-acqrel forbidden=0
+variant=iriw-scfence forbidden=0
+litmus done

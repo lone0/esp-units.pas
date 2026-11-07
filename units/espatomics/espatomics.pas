@@ -4,18 +4,13 @@ unit espatomics;
 
 {$mode objfpc}
 {$H+}
-{$modeswitch typehelpers}
 {$modeswitch advancedrecords}
 
 interface
 
-{$IFDEF FREERTOS}
-uses
-  freertosinterlocked;
-{$ENDIF}
-{ Host targets compile without any uses clause: the TInterlockedEsp helper
-  wraps the FreeRTOS-only TInterlocked baseline, and the leaf primitives
-  use the System unit's Interlocked* routines directly. }
+{ The unit has no uses clause on any target: the leaf primitives are
+  self-contained (RV32A assembler leaves, stock backend maps to
+  the System unit's Interlocked* routines, which exist on every target). }
 
 {$I espatomics_interface.inc}
 
@@ -28,7 +23,5 @@ implementation
 {$ELSE}
 {$I espatomics_backend_stock.inc}
 {$ENDIF}
-
-{$I espatomics_impl.inc}
 
 end.

@@ -135,3 +135,65 @@ begin
   Result := HwWeak(PUInt32(@Target)^, UInt32(Value), UInt32(Comparand), Seen);
   Observed := Pointer(Seen);
 end;
+
+{ ---- unit-level primitive implementations ------------------------------- }
+{ These call the Hw* inline helpers above; the Hw* bodies fold into the
+  caller's code (same-unit inline), resulting in 1 Xt* leaf call each. }
+
+function AtomicExchangeAcqRel(var Target: UInt32; Source: UInt32): UInt32;
+begin
+  XtMemw;
+  Result := XtExchange(Target, Source);
+  XtMemw;
+end;
+
+function AtomicExchangeSeqCst(var Target: UInt32; Source: UInt32): UInt32;
+begin
+  XtMemw;
+  Result := XtExchange(Target, Source);
+  XtMemw;
+end;
+
+function FetchAdd(var Target: UInt32; Source: UInt32): UInt32;
+begin
+  XtMemw;
+  Result := XtFetchOp(Target, Source, 0);
+  XtMemw;
+end;
+
+function FetchSub(var Target: UInt32; Source: UInt32): UInt32;
+begin
+  XtMemw;
+  Result := XtFetchOp(Target, Source, 1);
+  XtMemw;
+end;
+
+function FetchAnd(var Target: UInt32; Source: UInt32): UInt32;
+begin
+  XtMemw;
+  Result := XtFetchOp(Target, Source, 2);
+  XtMemw;
+end;
+
+function FetchOr(var Target: UInt32; Source: UInt32): UInt32;
+begin
+  XtMemw;
+  Result := XtFetchOp(Target, Source, 3);
+  XtMemw;
+end;
+
+function FetchXor(var Target: UInt32; Source: UInt32): UInt32;
+begin
+  XtMemw;
+  Result := XtFetchOp(Target, UInt32(-Source), 0);
+  XtMemw;
+end;
+
+function CompareExchangeWeak(var Target: UInt32; Value, Comparand: UInt32;
+  out Observed: UInt32): Boolean;
+begin
+  XtMemw;
+  Observed := XtCasOnce(Target, Value, Comparand);
+  XtMemw;
+  Result := Observed = Comparand;
+end;

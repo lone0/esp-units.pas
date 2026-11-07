@@ -9,7 +9,7 @@ unit uses an FPC **class helper** on `TInterlocked` to:
 - **pass through** baseline ops so unmodified call sites keep old
   behaviour;
 - **shadow** selected `UInt32` hot-path ops with ISA inline sequences;
-- **extend** with acquire/release, weak CAS, and `TAtomicFlag` for new
+- **extend** with acquire/release, weak CAS, and RMW fetch ops for new
   code.
 
 Zero call overhead on the dedicated backends: backends are `$I` textual
@@ -24,7 +24,7 @@ zero-overhead claim.
 | --- | --- | --- |
 | Pass-through | `Increment` / `Decrement` / `Add` / `And` / `Or` / `Xor`, Int64 read/write | Unchanged RTL behaviour for old call sites |
 | Shadow | `Exchange` / strong `CompareExchange` on `UInt32` | Hardware inline where the backend supports it (e.g. Xtensa `S32C1I`) |
-| Extension | `ReadAcquire` / `WriteRelease` (incl. `Pointer`), `CompareExchangeWeak`, `Fetch*`, `TAtomicFlag` | New APIs for new code only |
+| Extension | `ReadAcquire` / `WriteRelease` (incl. `Pointer`), `AtomicExchangeAcqRel`/`SeqCst`, `CompareExchangeWeak`, `Fetch*` | New APIs for new code only |
 | Not provided | `atomic_init` / `is_lock_free` | Embedded defaults; no runtime tax |
 
 Pass-through exists so enabling this unit never retargets unmodified call
@@ -49,32 +49,34 @@ backend registry.
 | File | Role |
 | --- | --- |
 | `espatomics.pas` | Unit shell; selects one backend `$I` |
-| `espatomics_interface.inc` | Unit-level `ReadAcquire`/`WriteRelease` leaves, `TAtomicFlag`, FreeRTOS-only `TInterlockedEsp` declarations |
-| `espatomics_impl.inc` | Helper method bodies (FreeRTOS) + `TAtomicFlag` |
-| `espatomics_backend_xtensa.inc` | FreeRTOS Xtensa (`L32I`+`MEMW` / `MEMW`+`S32I`) |
+| `espatomics_interface.inc` | Unit-level leaf declarations (ReadAcquire/WriteRelease, AtomicExchangeAcqRel/SeqCst, Fetch*, CompareExchangeWeak) |
 | `espatomics_backend_rv32a.inc` | FreeRTOS RV32 with `CPURV_HAS_ATOMIC` |
 | `espatomics_backend_stock.inc` | Direct `System.Interlocked*` degradation path |
-| `freertosinterlocked.pas` | FreeRTOS-only 32-bit `TInterlocked` baseline (RTL `SyncObjs` gap) |
 
 ## Rejected layouts
 
 | Layout | Why rejected |
 | --- | --- |
-| Backend unit owns `TInterlockedEsp` methods | FPC requires method bodies in the declaring unit |
+| Backend unit owns helper methods | FPC requires method bodies in the declaring unit |
 | Facade → `inline` routines in backend units | Assembler routines are not inlined across units |
 
 ## Uses-clause rule
 
-FreeRTOS callers: put `espatomics` after `freertosinterlocked` (the
-`TInterlockedEsp` helper extends the FreeRTOS-only `TInterlocked`
-baseline; helper shadowing depends on declaration order). Host targets
-compile the unit with no uses clause at all — the helper does not exist
-there and the unit-level primitives use `System.Interlocked*` directly.
+The unit takes NO uses clause on any target — no helper, no baseline
+unit. The class-helper era (2026-11-05, superseded 2026-11-07): a
+`TInterlockedEsp = class helper for TInterlocked` was meant to carry
+cross-platform compatibility, but (a) helper methods can never be
+1-call (cross-unit inline is refused three ways), (b) same-named
+unit-level primitives create a self-recursion hazard inside helper
+bodies, (c) the freertos baseline unit existed only to give the helper
+something to extend. The unit-level direct-through design makes all of
+that unnecessary; BitTestAnd* convenience died with the helper (it was
+mask/or arithmetic, not an ordering primitive).
 
 ## Internal DRAM for atomics-backed state
 
 ESP32-S3 external PSRAM does not support `S32C1I`. Lock-free queue heads,
-counters, and `TAtomicFlag` storage must be **static/global (internal
+counters must be **static/global (internal
 DRAM)** or allocated with `MALLOC_CAP_INTERNAL`. Atomics on PSRAM →
 `StoreProhibited`. Normative wording:
 [`REQUIREMENTS.md`](./REQUIREMENTS.md).
@@ -196,6 +198,48 @@ section above). The RTL barrier routine cost is invisible at pipeline
 scale; the layer tax is what matters. Bare-assignment SPSC on S31 can
 livelock permanently in the empty state — the "expected failure" of
 plain is stronger than corruption: it is a system-level hang.
+
+Over-protection ledger — per litmus family, what the stock barrier set
+(ir,ir / ow,ow / iorw,iorw only) forces, and what primitive would
+remove the over-strength:
+
+| family/case | precise order needed | C11 primitive | FPC forced to | missing primitive that removes it | over-strength cost |
+| --- | --- | --- | --- | --- | --- |
+| SB/Dekker (W→R) | `fence w,r` | `atomic_thread_fence(seq_cst)` → `fence rw,rw`; or exchange(seq_cst) → `amoswap.w.aqrl` | `System.ReadWriteBarrier` call (`fence iorw,iorw` ⊇ w,r) | **`fence w,r`** as a System primitive, or native aqrl-store emission | fence-bit delta ≈ 0 (full ≈ narrow, measured); call layer 1 × ~45 ns per Dekker point |
+| MP (release store + acquire load) | W→W, R→R, R→W ×2 | `atomic_store_explicit(release)` + `atomic_load_explicit(acquire)` → `fence rw,w; sw` / `lw; fence r,rw` | 4 barrier CALLS/item (2 precise: ow,ow / ir,ir; 2 over-strong: iorw,iorw ⊇ r,w) | **`fence r,w` + `fence rw,w` / `fence r,rw` as System primitives**, or macro-inlined fences (0 calls) | fence-bit delta ≈ 0; call layers 4 × ~45 ns ≈ 180 ns/item ≈ −9% (barrier variant measured 2.18 M) |
+| LB (R→R + R→W) | same as MP minus one point | same acquire/release pair | 2 barrier CALLS/item (1 precise ir,ir; 1 over-strong) | `fence r,w` primitive | ≈ 0 bits; 2 calls × ~45 ns ≈ −5–9% |
+| WRC / ISA2 (3-thread cumulativity) | release A-cumulativity across cores | same pair — C11 release is A-cumulative | same RTL barriers (cumulativity preserved when narrowing) | — (narrowing loses nothing) | ≈ 0 bits; call layers as above |
+| IRIW (seq_cst readers) | full order between the two reads per reader | `atomic_thread_fence(seq_cst)` ×2/reader → `fence rw,rw` | `System.ReadWriteBarrier` ×2/reader (shape PRECISE — seq_cst needs full anyway) | — (shape already exact; only the call layers) | ≈ 0 bits; 2–4 calls × ~45 ns per IRIW point |
+| lock (LISA LOCK/UNLOCK) | acquire+release around the critical section | no direct C11 primitive — exchange(acq_rel) + fences, or C11 mutex | `AtomicExchange` enter + `ReadWriteBarrier`/exit composition | — (composition already precise; PSRAM lock word is unfixable by primitives — cache, not ordering) | ≈ 0 bits; 3–4 calls/lock op |
+
+The over-strength BITS cost ≈ 0 on the quiet pipeline (full ≈ narrow,
+measured). The real costs of the missing primitives are: (1) the call
+layers — every sync point is ≥1 call, ~45 ns each, and cross-unit
+inlining of asm-containing bodies is refused (three-layer refusal,
+above); (2) expressiveness — some precise order relations (W→R as
+`fence w,r`) cannot be expressed at all without the full fence's
+over-reach, which on busy real pipelines (I/O, DMA in flight) serializes
+unrelated traffic; (3) the plain livelock — with NO primitive available,
+the failure mode is a system hang, not corrupt data.
+
+Efficiency-gap ledger — the second dimension of missing primitives.
+Beyond over-strength, stock FPC lacks the FUSED shapes that C11 maps
+to directly: an acquire load is `lw` + `fence r,rw` in ONE routine
+(espatomics ReadAcquire); a release store is `fence rw,w` + `sw` in
+ONE routine (espatomics WriteRelease). The stock composition uses
+separate barrier calls at each point — each an unconditional ~45 ns.
+The fused primitive halves the barrier count for the consumer's
+acquire path (R→R + R→W in one `fence r,rw`) and eliminates the
+producer's separate release fence. Quantified per item (1M items,
+S31 Mosaico):
+
+| composition | barriers/item | calls/item | measured items/s |
+| --- | --- | --- | --- |
+| stock barrier (4 RTL calls) | 4 | 4 | 2.18–2.20 M |
+| fused acquire load + release store | 2 | 2 | (projected ≈ 2.6–2.8 M) |
+
+The fused shape saves ~2 calls and ~2 barriers per item — the dominant
+saving is the call overhead (~90 ns/item), not the fence execution.
 
 First generation (6 sync methods, median of ~10 runs, checksums ok):
 
@@ -493,7 +537,7 @@ Readings:
 the unknown-platform degradation check.** Three proofs:
 
 1. Source: with `FREERTOS` undefined the unit compiles the stock backend
-   (the `TInterlockedEsp` helper does not exist there; no SyncObjs needed).
+   (no helper exists anywhere anymore; no SyncObjs needed).
 2. Binary: the demo call sites resolve to direct RTL calls —
    `call SYSTEM_$$_INTERLOCKEDCOMPAREEXCHANGE…` /
    `call SYSTEM_$$_INTERLOCKEDEXCHANGE…` (the inline stock leaf folds to
@@ -503,4 +547,84 @@ the unknown-platform degradation check.** Three proofs:
    r00 = 0 (x86 is TSO). Performance not a host deliverable.
 
 Raw logs: `demos/*.hw.log` (S31), `demos/*.x86.log` (host).
+
+## Six-family litmus suite (`units/espatomics/litmus/litmus.pas`, 2026-11-07)
+
+Six classic litmus families swept on one binary (runtime variant table,
+20 shapes = 6 families x 3-5 shapes, 200k rounds each, control words
+behind opaque accessors, litmus bodies fused asm for bare shapes so no
+result is a codegen-gap artifact). Two-core mapping adaptations — chosen
+so each family's forbidden outcome is CONSTRUCTIBLE:
+
+- SB: P0/c0, P1/c1 (demos/dekker.pas protocol, in-depth there).
+- MP: producer/c1, consumer(main)/c0.
+- LB: P0/c0, P1/c1. Forbidden outcome is r0=1 AND r1=1 (both read the
+  other's NEW value) — (0,0) is SC-legal and would make the family
+  vacuous.
+- WRC/ISA2: P0+P1 fused on c0 (x-store, observation r1, y<-r1 publish),
+  P2 alone on c1. The fusion makes the causality chain's first hop
+  same-core (monotone, r1 always 1); what remains testable is the
+  PROPAGATION question — can the later core-0 store (y) overtake the
+  earlier one (x) on the way to core 1. The writer's data store is
+  deliberately UNFLUSHED (after the round publish, before the Go
+  handshake) so the window stays open; the round reset is fenced.
+- IRIW: writer+reader fused per core (P0(wx)+P2/c0, P1(wy)+P3/c1) —
+  each reader's "sees-new" read is same-core, "may-be-stale" read
+  cross-core; both readers run concurrently. Writer stores unflushed.
+
+Strength matrix (family -> minimal ordering -> C11 construct -> our
+primitive):
+
+| family | minimal edge | C11 construct | primitive(s) | gap |
+| --- | --- | --- | --- | --- |
+| SB | W->R (store->own load) | atomic_thread_fence(seq_cst) between the pair; a seq_cst STORE alone does not close it in the model (relaxed loads never enter S) | System.ReadWriteBarrier; ExchangeAcqRel/SeqCst flag-store = divergence probe | acquire/release cannot make this edge at all |
+| MP | W->W + R->R | atomic_store_explicit(release) + atomic_load_explicit(acquire) | WriteRelease + ReadAcquire | none (definition domain) |
+| LB | R->W | atomic_load_explicit(acquire) on the litmus load | ReadAcquire | none |
+| WRC/ISA2 | R->W + W->W + A-cumulativity | release store + acquire load (fences are A-cumulative in RVWMO; aq/rl BITS are not — a bit-based implementation would fail here) | WriteRelease + ReadAcquire | only the implementation choice (fence vs bits) |
+| IRIW | R->R x2 + SC total order | atomic_thread_fence(seq_cst) between the reads | System.ReadWriteBarrier; ReadAcquire-as-first-read = model-divergence probe | C11-acquire allows IRIW; RVWMO cumulative-fence cycle forbids it |
+
+**S31 silicon (200k rounds/variant, 2 runs, ttyACM0):**
+
+| variant | forbidden | variant | forbidden |
+| --- | --- | --- | --- |
+| sb-bare | **281 / 295** | wrc-bare / acqrel / scfence | 0 / 0 / 0 |
+| sb-acqrel | 0 / 0 | isa2-bare / acqrel / scfence | 0 / 0 / 0 |
+| sb-exch-acqrel | 0 / 0 | iriw-bare / acqrel / scfence | 0 / 0 / 0 |
+| sb-exch-seqcst | 0 / 0 | mp-bare / acqrel / scfence | 0 / 0 / 0 |
+| sb-scfence | 0 / 0 | lb-bare / acqrel / scfence | 0 / 0 / 0 |
+
+Readings:
+
+- **SB is the only family whose window opens on this silicon** (0.14-0.15%
+  of rounds, matching the dekker_s31 rate) — and every ordering shape
+  closes it. Suite validity is therefore proven: the harness DOES reach
+  the weak-memory window when one exists.
+- **Divergence probe 1 resolved (SB exchstore):** both ExchangeAcqRel and
+  ExchangeSeqCst flag-stores measured 0 — the amoswap.w.aqrl acquire half
+  really does order the store before the following load on this silicon,
+  which the C11 MODEL does not promise for acq_rel (the relaxed load
+  never enters S). acq_rel vs seq_cst: identical encoding, identical
+  silicon result, run under both names.
+- **Divergence probe 2 left open empirically (IRIW acqrel):** 0 observed,
+  but the bare shape also measured 0 — the harness cannot distinguish
+  "closed by the acquire" from "window never opened" here.
+- **MP/LB/WRC/ISA2/IRIW bare = 0: constructible but never observed.**
+  Consistent picture: the S31 interconnect propagates a core's stores to
+  the opposite core IN ORDER (MP's data-before-flag always held; the
+  WRC/ISA2 "later store overtakes earlier one" inversion never appeared),
+  and LB's double-window (both cores must lag into each other
+  simultaneously) never fired in 200k rounds. These are silicon +
+  harness results, not model theorems.
+- All acquire/release and full-fence shapes: 0 — consistent with both
+  the closures and the ordered-propagation picture.
+
+Two bugs found and fixed during the first hardware bring-up (recorded
+because they are easy to re-introduce): (1) the worker published only
+Done1, never the load results (Obs1) for SB/LB — every forbidden count
+became a constant-zero or constant-nonzero artifact; (2) putting the
+writer's data store BEFORE a protocol FenceFull pre-flushes it globally
+and closes the very window the family probes — the data store must be
+the UNFLUSHED tail of the main-side prefix.
+
+Raw logs: `litmus/litmus.hw.log`, `litmus/litmus.hw.log2`.
 

@@ -20,9 +20,9 @@ It contains two kinds of things:
      manager: all Pascal dynamic memory flows into the IDF pool
      (PSRAM-eligible once enabled) instead of a compiler-baked static block.
    - [`units/espatomics/`](units/espatomics/) — self-contained ESP.Atomics
-     sub-project: Interlocked-style baseline the freertos RTL lacks,
-     fetch/CAS/acquire-release atomics, and `TAtomicFlag`, with xtensa /
-     RV32A backends and a stock fallback. Docs live in that
+     sub-project: unit-level atomics leaves (acquire/release,
+     acq_rel/seq_cst exchange, fetch ops, weak CAS) with
+     xtensa / RV32A backends and a stock fallback. Docs live in that
      directory (`REQUIREMENTS` / `DESIGN` / `IMPLEMENTATION` / `AGENTS`).
    Unit APIs are documented in [`units/README.md`](units/README.md);
    atomics detail is only under `units/espatomics/`.

@@ -34,32 +34,43 @@ asm
   sw a1, 0(a0)
 end;
 
-function HwExchange(var Target: UInt32; Value: UInt32): UInt32; assembler; nostackframe;
+function AtomicExchangeAcqRel(var Target: UInt32; Source: UInt32): UInt32; assembler; nostackframe;
 asm
   amoswap.w.aqrl a0, a1, 0(a0)
 end;
 
-function HwFetchAdd(var Target: UInt32; Value: UInt32): UInt32; assembler; nostackframe;
+function AtomicExchangeSeqCst(var Target: UInt32; Source: UInt32): UInt32; assembler; nostackframe;
+asm
+  amoswap.w.aqrl a0, a1, 0(a0)
+end;
+
+function FetchAdd(var Target: UInt32; Source: UInt32): UInt32; assembler; nostackframe;
 asm
   amoadd.w.aqrl a0, a1, 0(a0)
 end;
 
-function HwFetchAnd(var Target: UInt32; Value: UInt32): UInt32; assembler; nostackframe;
+function FetchSub(var Target: UInt32; Source: UInt32): UInt32; assembler; nostackframe;
+asm
+  neg a1, a1
+  amoadd.w.aqrl a0, a1, 0(a0)
+end;
+
+function FetchAnd(var Target: UInt32; Source: UInt32): UInt32; assembler; nostackframe;
 asm
   amoand.w.aqrl a0, a1, 0(a0)
 end;
 
-function HwFetchOr(var Target: UInt32; Value: UInt32): UInt32; assembler; nostackframe;
+function FetchOr(var Target: UInt32; Source: UInt32): UInt32; assembler; nostackframe;
 asm
   amoor.w.aqrl a0, a1, 0(a0)
 end;
 
-function HwFetchXor(var Target: UInt32; Value: UInt32): UInt32; assembler; nostackframe;
+function FetchXor(var Target: UInt32; Source: UInt32): UInt32; assembler; nostackframe;
 asm
   amoxor.w.aqrl a0, a1, 0(a0)
 end;
 
-function HwWeak(var Target: UInt32; Value, Comparand: UInt32; out Observed: UInt32): Boolean; assembler; nostackframe;
+function CompareExchangeWeak(var Target: UInt32; Value, Comparand: UInt32; out Observed: UInt32): Boolean; assembler; nostackframe;
 asm
   lr.w.aq a4, 0(a0)
   sw a4, 0(a3)
@@ -72,11 +83,3 @@ asm
   addi a0, a6, 0
 end;
 
-function HwWeakPointer(var Target: Pointer; Value, Comparand: Pointer;
-  out Observed: Pointer): Boolean; inline;
-var
-  Seen: UInt32;
-begin
-  Result := HwWeak(PUInt32(@Target)^, UInt32(Value), UInt32(Comparand), Seen);
-  Observed := Pointer(Seen);
-end;

@@ -10,34 +10,31 @@ procedure WriteRelease(var Target: UInt32; Value: UInt32); overload;
 procedure WriteRelease(var Target: LongInt; Value: LongInt); overload;
 procedure WriteRelease(var Target: Pointer; Value: Pointer); overload;
 
-type
-  TAtomicFlag = record
-  private
-    FValue: UInt32;
-  public
-    procedure Init; inline;
-    function TestAndSet: Boolean; inline;
-    procedure Clear; inline;
-  end;
+{ RMW leaves: C11 atomic_exchange_explicit(memory_order_acq_rel) and
+  atomic_exchange_explicit(memory_order_seq_cst). Named and shaped after
+  the compiler intrinsic System.AtomicExchange: stores Source into Target
+  and returns the PRIOR content of Target — with the memory order
+  promoted from relaxed to acq_rel / seq_cst (parameter type UInt32 vs
+  the intrinsic's LongInt; same 32-bit machine shape). On RV32A both
+  emit the SAME amoswap.w.aqrl encoding — the distinction is model-level
+  only (participation in the SC total order, e.g. IRIW classification).
+  Note the boundary: the SB/Dekker and IRIW forbiddens are expressed in
+  C11 with atomic_thread_fence(memory_order_seq_cst) between the access
+  pairs; these RMW primitives do not provide that fence. }
+function AtomicExchangeAcqRel(var Target: UInt32; Source: UInt32): UInt32;
+function AtomicExchangeSeqCst(var Target: UInt32; Source: UInt32): UInt32;
 
-{$IFDEF FREERTOS}
-  { FreeRTOS-only: wraps the freertosinterlocked TInterlocked baseline }
-  TInterlockedEsp = class helper for TInterlocked
-  public
-{$IFDEF FREERTOS}
-    class function BitTestAndSet(var Target: LongInt; BitOffset: TBitOffset): Boolean; static; inline;
-    class function BitTestAndClear(var Target: LongInt; BitOffset: TBitOffset): Boolean; static; inline;
-{$ENDIF}
-    class function FetchAdd(var Target: UInt32; Value: UInt32): UInt32; overload; static; inline;
-    class function FetchSub(var Target: UInt32; Value: UInt32): UInt32; overload; static; inline;
-    class function FetchAnd(var Target: UInt32; Value: UInt32): UInt32; overload; static; inline;
-    class function FetchOr(var Target: UInt32; Value: UInt32): UInt32; overload; static; inline;
-    class function FetchXor(var Target: UInt32; Value: UInt32): UInt32; overload; static; inline;
-    class function CompareExchangeWeak(var Target: LongInt; Value, Comparand: LongInt;
-      out Observed: LongInt): Boolean; overload; static; inline;
-    class function CompareExchangeWeak(var Target: UInt32; Value, Comparand: UInt32;
-      out Observed: UInt32): Boolean; overload; static; inline;
-    class function CompareExchangeWeak(var Target: Pointer; Value, Comparand: Pointer;
-      out Observed: Pointer): Boolean; overload; static; inline;
-  end;
-{$ENDIF}
+{ RMW fetch leaves: C11 atomic_fetch_<op>_explicit(memory_order_acq_rel)
+  (the RV32A leaves emit amo*.w.aqrl — full acq_rel ordering, stronger
+  than the relaxed default; the aqrl premium is ~17 ns/access here).
+  CompareExchangeWeak = C11 atomic_compare_exchange_weak_explicit
+  (acq_rel, acquire) — lr.w.aq + sc.w.rl, may fail spuriously per the
+  weak contract. UInt32 only for now; Pointer/LongInt overloads follow
+  on demand. }
+function FetchAdd(var Target: UInt32; Source: UInt32): UInt32;
+function FetchSub(var Target: UInt32; Source: UInt32): UInt32;
+function FetchAnd(var Target: UInt32; Source: UInt32): UInt32;
+function FetchOr(var Target: UInt32; Source: UInt32): UInt32;
+function FetchXor(var Target: UInt32; Source: UInt32): UInt32;
+function CompareExchangeWeak(var Target: UInt32; Value, Comparand: UInt32;
+  out Observed: UInt32): Boolean;

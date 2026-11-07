@@ -28,58 +28,63 @@ begin
   InterlockedExchange(Target, Value);
 end;
 
-function HwExchange(var Target: UInt32; Value: UInt32): UInt32; inline;
+{ acq_rel and seq_cst RMW degrade to the same full-barrier RTL exchange }
+function AtomicExchangeAcqRel(var Target: UInt32; Source: UInt32): UInt32; inline;
 begin
-  Result := UInt32(InterlockedExchange(PLongInt(@Target)^, LongInt(Value)));
+  Result := UInt32(InterlockedExchange(PLongInt(@Target)^, LongInt(Source)));
 end;
 
-function HwFetchAdd(var Target: UInt32; Value: UInt32): UInt32; inline;
+function AtomicExchangeSeqCst(var Target: UInt32; Source: UInt32): UInt32; inline;
 begin
-  Result := UInt32(InterlockedExchangeAdd(PLongInt(@Target)^, LongInt(Value)));
+  Result := UInt32(InterlockedExchange(PLongInt(@Target)^, LongInt(Source)));
 end;
 
-function HwFetchAnd(var Target: UInt32; Value: UInt32): UInt32; inline;
+function FetchAdd(var Target: UInt32; Source: UInt32): UInt32; inline;
+begin
+  Result := UInt32(InterlockedExchangeAdd(PLongInt(@Target)^, LongInt(Source)));
+end;
+
+function FetchSub(var Target: UInt32; Source: UInt32): UInt32; inline;
+begin
+  Result := UInt32(InterlockedExchangeAdd(PLongInt(@Target)^, LongInt(-Source)));
+end;
+
+function FetchAnd(var Target: UInt32; Source: UInt32): UInt32; inline;
 var
   Old, Seen: LongInt;
 begin
   repeat
     Old := LongInt(Target);
-    Seen := InterlockedCompareExchange(PLongInt(@Target)^, Old and LongInt(Value), Old);
+    Seen := InterlockedCompareExchange(PLongInt(@Target)^, Old and LongInt(Source), Old);
   until Seen = Old;
   Result := UInt32(Old);
 end;
 
-function HwFetchOr(var Target: UInt32; Value: UInt32): UInt32; inline;
+function FetchOr(var Target: UInt32; Source: UInt32): UInt32; inline;
 var
   Old, Seen: LongInt;
 begin
   repeat
     Old := LongInt(Target);
-    Seen := InterlockedCompareExchange(PLongInt(@Target)^, Old or LongInt(Value), Old);
+    Seen := InterlockedCompareExchange(PLongInt(@Target)^, Old or LongInt(Source), Old);
   until Seen = Old;
   Result := UInt32(Old);
 end;
 
-function HwFetchXor(var Target: UInt32; Value: UInt32): UInt32; inline;
+function FetchXor(var Target: UInt32; Source: UInt32): UInt32; inline;
 var
   Old, Seen: LongInt;
 begin
   repeat
     Old := LongInt(Target);
-    Seen := InterlockedCompareExchange(PLongInt(@Target)^, Old xor LongInt(Value), Old);
+    Seen := InterlockedCompareExchange(PLongInt(@Target)^, Old xor LongInt(Source), Old);
   until Seen = Old;
   Result := UInt32(Old);
 end;
 
-function HwWeak(var Target: UInt32; Value, Comparand: UInt32; out Observed: UInt32): Boolean; inline;
+function CompareExchangeWeak(var Target: UInt32; Value, Comparand: UInt32; out Observed: UInt32): Boolean; inline;
 begin
   Observed := UInt32(InterlockedCompareExchange(PLongInt(@Target)^, LongInt(Value), LongInt(Comparand)));
   Result := Observed = Comparand;
 end;
 
-function HwWeakPointer(var Target: Pointer; Value, Comparand: Pointer;
-  out Observed: Pointer): Boolean; inline;
-begin
-  Observed := InterlockedCompareExchange(Target, Value, Comparand);
-  Result := Observed = Comparand;
-end;

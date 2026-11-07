@@ -120,10 +120,76 @@ Self-contained under [`espatomics/`](./espatomics/):
 | [`espatomics/IMPLEMENTATION.md`](./espatomics/IMPLEMENTATION.md) | File map, backends, how to extend |
 | [`espatomics/AGENTS.md`](./espatomics/AGENTS.md) | Agent rules for this sub-project |
 
-Entry unit: `espatomics.pas` (unit-level `ReadAcquire`/`WriteRelease` leaves, `TAtomicFlag`, FreeRTOS-only `TInterlockedEsp` helper).
-FreeRTOS builds also need `freertosinterlocked.pas` for the 32-bit baseline.
+Entry unit: `espatomics.pas` — unit-level leaves only (ReadAcquire/WriteRelease, AtomicExchangeAcqRel/SeqCst, Fetch*, CompareExchangeWeak). No uses clause, no class helper, no baseline unit.
 
 ---
+
+## L1/L2 naming grammar — bindings vs native units
+
+Two unit kinds share `units/`, and the name tells them apart (FPC itself
+uses the `c` prefix for C-library bindings: `cthreads`, `cmem`, `cwstring`):
+
+| Layer | Name grammar | Nature | Units |
+|---|---|---|---|
+| L1 binding | `c_<C component short name>` | hand-converted C-header shadow: `cdecl; external` functions keep their C names; records are C-ABI-true (`{$packrecords C}`, `{$minenumsize 4}`, sizes verified against the C build) | `c_bmgr`, `c_lvgl_adapter`, `c_lvgl` |
+| L2 native | functional name, no `c_` prefix | Pascal-idiomatic service built on L1: advanced records with static methods, value-semantics config, `esp_err_t` visible, no exceptions | `boarddisplay` (the functional `idfheap` and the `espatomics` sub-project predate the grammar and are L2 by nature) |
+
+Rules the grammar enforces:
+
+- An L1 unit is only ever edited as a header re-conversion: the source of
+  truth is the C component + the consuming SDK project's sdkconfig, and the
+  header comment records the conversion basis and validity domain. Never
+  "improve" a C name inside L1 — idiomatization happens in L2.
+- An L2 unit names its L1 dependencies, states its contract (what auto-runs
+  at `uses`, what stays explicit), and only exists where a real consumer
+  repeats friction — no speculative layer.
+- L2 config surfaces are value-only (scalars/enums in one record); callback
+  hooks stay L1.
+
+## `c_bmgr` — esp_board_manager binding (L1)
+
+Hand-converted from the esp_board_manager C headers (`esp_board_manager.h`,
+`_defs.h`, `dev_display_lcd.h`, `dev_lcd_touch.h`) flattened with the
+lvgl-s31 SDK project's own toolchain against its sdkconfig (ESP-Mosaico: of
+the display sub-types only SPI survives the CONFIG gating; `CONFIG_SPIRAM=y`).
+Record sizes verified against the C build (`dev_display_lcd_config_t` = 108 B,
+touch config 108 B, SPI IO config 44 B, …). API: `init`,
+`init/deinit_device_by_name`, `get_device_handle/config`, `get_board_info`,
+plus the two device factories' entry points. The registry resolves only when
+the component archives are whole-linked — `--lib espressif__esp_board_manager
+--lib gen_bmgr_codes` (full closures in the examples' READMEs).
+
+## `c_lvgl_adapter` — esp_lvgl_adapter binding (L1)
+
+Hand-converted from `espressif__esp_lvgl_adapter` headers against the same
+sdkconfig (the `CONFIG_ESP_LVGL_ADAPTER_ENABLE_FS/_DECODER/_FREETYPE/_BUTTON/
+_KNOB/_FPS_STATS` blocks compile out there and are absent here). Covers the
+active surface: adapter init/start/deinit, display + touch registration,
+lock/unlock, activity/wake, pause/resume, sleep prepare/recover, dummy draw.
+The C designated-initializer config macros have record-returning Pascal
+equivalents verified field-for-field.
+
+## `c_lvgl` — LVGL 9.6 working subset (L1)
+
+Hand-converted working subset of `lvgl__lvgl` 9.6.0: screen/objects, label +
+button, geometry, style setters, events, display info, `lv_font_montserrat_14`.
+Grows per business need — deliberately NOT the full lvgl.h. The header comment
+records the v9 facts it bakes in: int32_t coordinates, the real symbol
+`lv_screen_active` (v8's `lv_scr_act` is only a macro), `lv_obj_is_in_widget_tree`
+(v8's `lv_obj_is_valid` ditto), and the packed-`lv_color_t` by-value strategy
+(psABI-bitified `cuint`; no C function returning `lv_color_t` is ever bound).
+
+## `boarddisplay` — display-chain facade (L2)
+
+`uses boarddisplay` lazily initializes the three display-chain devices
+(display_lcd, lcd_touch, lcd_brightness) in the unit initialization;
+`TBoardDisplay.Start` (or `StartEx(TBoardDisplayConfig)`) brings the
+esp_lvgl_adapter up with display + touch registered and the worker running —
+then `lv_screen_active()` is live and Pascal UI code runs under
+`TBoardDisplay.UILock/UIUnlock`. `Stop` is the terminal teardown (main.c's
+cleanup path as a function). Full-board init stays L1
+(`esp_board_manager_init`); callback hooks and TE/mono display profiles stay
+L1 (`c_lvgl_adapter`). Consumer: `../examples/display-native/`.
 
 ## `esp-units.pas` root
 
@@ -133,7 +199,7 @@ Where to look for what:
 
 | Directory | Content |
 |---|---|
-| `units/` | `idfheap` + self-contained `espatomics/` sub-project |
+| `units/` | `idfheap` + self-contained `espatomics/` sub-project + L1 bindings (`c_bmgr`, `c_lvgl_adapter`, `c_lvgl`) + L2 `boarddisplay` |
 | `units/espatomics/` | ESP.Atomics docs + sources (see its `AGENTS.md`) |
 | `tests/` | compiler verification + demonstration programs (`tests/README.md` per test) |
 | `scripts/` | build / QEMU / flash automation, SoC-parameterized |
