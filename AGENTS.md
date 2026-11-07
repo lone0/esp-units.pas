@@ -60,9 +60,13 @@ workspace was removed *after* every one of its functions moved here.
 |---|---|
 | `units/idfheap.pp` | IDF-heap memory-manager bridge (**first in uses** rule); suite-exercised every run |
 | `units/espatomics/` | self-contained ESP.Atomics sub-project (§1): sources + `REQUIREMENTS` / `DESIGN` / `IMPLEMENTATION` / `AGENTS` |
-| `units/README.md` | API docs + examples for published units; points at `units/espatomics/` for atomics |
+| `units/c_bmgr.pas` | L1 binding: esp_board_manager (hand-converted against the lvgl-s31 sdkconfig; registry needs whole-archive `--lib espressif__esp_board_manager --lib gen_bmgr_codes`) |
+| `units/c_lvgl_adapter.pas` | L1 binding: espressif__esp_lvgl_adapter (CONFIG-gated active surface; designated-initializer macros as field-verified Pascal record functions) |
+| `units/c_lvgl.pas` | L1 binding: LVGL 9.6 working subset (grows per business; bakes the v9 facts incl. the packed-`lv_color_t` by-value strategy — psABI-bitified cuint, **hardware-verified pure-red 2026-11-07**) |
+| `units/boarddisplay.pas` | L2 facade: use → display-chain devices auto-initialized; `TBoardDisplay.Start/StartEx(config)/Stop/UILock/UIUnlock`; value-semantics config, callbacks/TE/mono stay L1 |
+| `units/README.md` | API docs + the **L1/L2 naming grammar** (`c_<C component>` = binding shadow, functional name = Pascal-native) + examples for published units; points at `units/espatomics/` for atomics |
 | `tests/` | the suite: 33 renamed webtbs regressions (incl. compile-only `u_generics_pubsub_events.pas`) + `t_generics_collections_tstack` (moved demo) + `t_encoding_roundtrip` (TEncoding functional); subdir `thread-stubs/` (designed-loud failures, out of stats); `run-tests.sh`, `README.md` per-test docs. Self-authored ad-hoc probes are NOT committed (policy 2026-10-24). |
-| `examples/` | unit demonstrations, read-first/run-by-hand (`idfheap-smoke.pas`, `leibniz.pas`, `pispigot-lcd.pas` + `waveshare_lcd.c` + `README.md` table); NOT part of the suite runner |
+| `examples/` | unit demonstrations, read-first/run-by-hand (`idfheap-smoke.pas`, `leibniz.pas`, `pispigot-lcd.pas` + `waveshare_lcd.c`, `bmgr-lvgl/`, `display-native/` + `README.md` table); NOT part of the suite runner |
 | `scripts/build.sh` | cross-compile (`--soc esp32s3|esp32s31`; per-SoC table at top; env required, no path defaults; `--c`/`--obj`/`--lib`/`--cflags` for C interop) |
 | `scripts/mkflash.sh` | elf/bin → flash image (bootloader/PT offsets from SDK sdkconfig; app @ 0x10000). Default padding = full flash size (QEMU needs 2/4/8/16 MB); `--tight` pads to the content end only |
 | `scripts/run-qemu.sh` | image → QEMU boot (esp32s3); esp32s31 is a placeholder → `run-esp-emu.sh` |
@@ -95,6 +99,23 @@ workspace was removed *after* every one of its functions moved here.
 6. Keep docs honest in both directions: don't claim suite coverage that
    doesn't exist (e.g. currently none for `espatomics`), and don't hide
    designed failures as bugs.
+7. Official Espressif MCP servers are configured globally in the user's
+   OpenCode (`mcp.espressif.com` catalog, 2026-11-06): documentation (`mcp.espressif.com/docs`),
+   component registry, engineering/troubleshooting, RainMaker, ESP-VISION,
+   ESP-Pilot. When a question concerns ESP chips or ESP SDKs (ESP-IDF,
+   peripheral behavior, hardware parameters), or a reusable ESP-IDF
+   component might exist, use the documentation and component-registry
+   servers without waiting to be asked; prefer them over web search.
+8. C components get L1 `c_<name>` bindings; Pascal-native services get
+   unprefixed L2 units (grammar in `units/README.md`). Decision record
+   (2026-11-07): for esp_board_manager the L2 is the **business-chain
+   facade** `boarddisplay`, and deliberately NOT an interface class (the C
+   registry is global, string-keyed, refcounted — a class would invent
+   ownership the C design does not have) and NOT a per-device record
+   family (the only consumers' real shape is "module-level var holds the
+   handle"; the mosaico business blocks need ~10 lines of extra struct
+   bindings total, all on the IDF-component side — iot_button, bq27220 —
+   not on bmgr). Build L2 only where a consumer repeats friction.
 
 ## 4. Environment interfaces
 
