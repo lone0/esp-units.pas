@@ -52,16 +52,36 @@ begin
   Result := Old;
 end;
 
-function HwReadAcquire(var Target: UInt32): UInt32; inline;
+function ReadAcquire(var Target: UInt32): UInt32; inline;
 begin
   Result := XtLoad(Target);
   XtMemw;
 end;
 
-procedure HwWriteRelease(var Target: UInt32; Value: UInt32); inline;
+function ReadAcquire(var Target: LongInt): LongInt; inline;
+begin
+  Result := LongInt(ReadAcquire(PUInt32(@Target)^));
+end;
+
+function ReadAcquire(var Target: Pointer): Pointer; inline;
+begin
+  Result := Pointer(ReadAcquire(PUInt32(@Target)^));
+end;
+
+procedure WriteRelease(var Target: UInt32; Value: UInt32); inline;
 begin
   XtMemw;
   XtStore(Target, Value);
+end;
+
+procedure WriteRelease(var Target: LongInt; Value: LongInt); inline;
+begin
+  WriteRelease(PUInt32(@Target)^, UInt32(Value));
+end;
+
+procedure WriteRelease(var Target: Pointer; Value: Pointer); inline;
+begin
+  WriteRelease(PUInt32(@Target)^, UInt32(Value));
 end;
 
 function HwExchange(var Target: UInt32; Value: UInt32): UInt32; inline;
@@ -105,16 +125,6 @@ begin
   Observed := XtCasOnce(Target, Value, Comparand);
   XtMemw;
   Result := Observed = Comparand;
-end;
-
-function HwReadAcquirePointer(var Target: Pointer): Pointer; inline;
-begin
-  Result := Pointer(HwReadAcquire(PUInt32(@Target)^));
-end;
-
-procedure HwWriteReleasePointer(var Target: Pointer; Value: Pointer); inline;
-begin
-  HwWriteRelease(PUInt32(@Target)^, UInt32(Value));
 end;
 
 function HwWeakPointer(var Target: Pointer; Value, Comparand: Pointer;

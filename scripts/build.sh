@@ -89,6 +89,11 @@ Derived automatically (no hand-edited fpc.cfg needed):
   libc scheme       <- when the project built esp_libc (IDF 6.x), the
                        toolchain's picolibc lib/<chip> is searched before the
                        legacy newlib dir; esp_libc needs picolibc's __bufio_*
+  OTG CDC console   <- when the SDK project links the usb_hs_console
+                       component (Type-C OTG CDC console, e.g. hello-s31 for
+                       ESP-Mosaico), the console chain + the app_main wrap
+                       are linked automatically: Pascal writeln reaches the
+                       host CDC with no per-source {$LINKLIB} and no flags
   C compile flags   <- with --c, the command IDF recorded for the project's
                        main/ component in build/compile_commands.json (exact
                        include order, chip codegen flags, defines)
@@ -441,13 +446,21 @@ if not db:
     sys.exit(0)
 entry = next((e for e in db if "/main/" in (e.get("file") or "")), db[0])
 args = shlex.split(entry.get("command") or " ".join(entry.get("arguments") or []))
-out, skip = [], False
+out, skip, keep_next = [], False, False
 for a in args[1:]:            # [0] is the compiler itself
     if skip:
         skip = False
         continue
+    if keep_next:             # bare-filename argument of -include/-isystem:
+        out.append(a)         # keep exactly these pairs
+        keep_next = False
+        continue
     if a in ("-o", "-MT", "-MF", "-MJ", "-MQ"):
         skip = True
+        continue
+    if a in ("-include", "-isystem"):
+        out.append(a)
+        keep_next = True
         continue
     if a in ("-c", "-MD", "-MMD", "-MP") or a.startswith("-o") \
        or a.startswith("-fmacro-prefix-map") or a.startswith("-fdiagnostics"):
@@ -456,6 +469,11 @@ for a in args[1:]:            # [0] is the compiler itself
     # the source itself as bare arguments.
     if a.startswith("-") or a.startswith("@"):
         out.append(a)
+# The @response files carry this toolchain's ABI (-mabi=ilp32f et al); this
+# gcc honors @files positioned first but treats one mid-list inconsistently
+# (a compile with it in place emits soft-float objects). Hoist them in front,
+# keeping relative order.
+out = [a for a in out if a.startswith("@")] + [a for a in out if not a.startswith("@")]
 print(" ".join(out))
 PY
 )
@@ -524,6 +542,27 @@ fi
 COREDUMP_A=$PRJ/build/esp-idf/espcoredump/libespcoredump.a
 if [ -f "$COREDUMP_A" ]; then
   LINK_EXTRA="$LINK_EXTRA -k--whole-archive -k$COREDUMP_A -k--no-whole-archive"
+fi
+
+# --- OTG CDC console (usb_hs_console component in the SDK project) -----------
+# When the IDF project links the usb_hs_console component (Type-C OTG CDC
+# console + auto-download reset, e.g. hello-s31 for the ESP-Mosaico), pull
+# the console chain in here. Same reasoning as above: a {$linklib} directive
+# would be scanned too early, and plain -k archives land before FPC's
+# objects. The chain initializes through the app_main linker wrap emitted
+# below, which runs BEFORE the RTL's app_main (= PASCALMAIN), so every
+# writeln reaches the host CDC with zero per-source directives.
+USB_CONSOLE_A=$PRJ/build/esp-idf/usb_hs_console/libusb_hs_console.a
+if [ -f "$USB_CONSOLE_A" ]; then
+  for l in espressif__esp_tinyusb espressif__tinyusb esp_hal_usb; do
+    A=$PRJ/build/esp-idf/$l/lib$l.a
+    [ -f "$A" ] || {
+      echo "usb_hs_console detected but $A is missing - rebuild the SDK project first" >&2
+      exit 1
+    }
+    LINK_EXTRA="$LINK_EXTRA -k--whole-archive -k$A -k--no-whole-archive"
+  done
+  LINK_EXTRA="$LINK_EXTRA -k--whole-archive -k$USB_CONSOLE_A -k--no-whole-archive -k--wrap=app_main"
 fi
 
 # RTL/package unit paths, derived: the cfg is optional (a bare or mid-rebuild

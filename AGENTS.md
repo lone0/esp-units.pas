@@ -39,14 +39,12 @@ workspace was removed *after* every one of its functions moved here.
   + a 4-patch series + a guarded rebuild setup. If a test here fails for a
   *compiler-internal* reason, that is a report-upstream topic, not a reason
   to enlarge this repo.
-- **One `units/` subdirectory (atomics) is FROZEN — user decision
-  2026-10-23:** no changes and no tests written for it in this repo, and its
-  unit / class / test names plus API documentation are **deferred to a
-  future version** of the repo docs. The directory is a verbatim copy of
-  the prototype used in its DESIGN (sources, checksum-verified at copy
-  time, plus that DESIGN page). Do not edit the sources; do not add tests for it;
-  demand for unit changes goes back to the user, not into this tree. The
-  repo's published docs refer to it only as "the frozen atomics suite".
+- **`units/espatomics/` is a self-contained sub-project (ESP.Atomics).**
+  Requirements, design, implementation, and its own agent knowledge live
+  under that directory (`REQUIREMENTS.md`, `DESIGN.md`,
+  `IMPLEMENTATION.md`, `AGENTS.md`). Treat it as the atomics product
+  surface; do not duplicate its API docs in the parent. Changes to atomics
+  sources or docs are made there, following that sub-project's AGENTS.md.
 - **Docs have prescribed forms:**
   - *test programs*: `tests/README.md` explains, per test, purpose /
     expected outcome / pitfall.
@@ -61,8 +59,8 @@ workspace was removed *after* every one of its functions moved here.
 | Path | What it is |
 |---|---|
 | `units/idfheap.pp` | IDF-heap memory-manager bridge (**first in uses** rule); suite-exercised every run |
-| `units/<unit-dir>/` | one subdirectory per unit; the frozen atomics suite (§1) there ships without API docs in this version: a small unit pair with 6 include fragments (4 per-architecture backends) and its own `DESIGN.md` |
-| `units/README.md` | API docs + examples for all units (describes the frozen atomics suite generically — API detail deferred, see §1) |
+| `units/espatomics/` | self-contained ESP.Atomics sub-project (§1): sources + `REQUIREMENTS` / `DESIGN` / `IMPLEMENTATION` / `AGENTS` |
+| `units/README.md` | API docs + examples for published units; points at `units/espatomics/` for atomics |
 | `tests/` | the suite: 33 renamed webtbs regressions (incl. compile-only `u_generics_pubsub_events.pas`) + `t_generics_collections_tstack` (moved demo) + `t_encoding_roundtrip` (TEncoding functional); subdir `thread-stubs/` (designed-loud failures, out of stats); `run-tests.sh`, `README.md` per-test docs. Self-authored ad-hoc probes are NOT committed (policy 2026-10-24). |
 | `examples/` | unit demonstrations, read-first/run-by-hand (`idfheap-smoke.pas`, `leibniz.pas`, `pispigot-lcd.pas` + `waveshare_lcd.c` + `README.md` table); NOT part of the suite runner |
 | `scripts/build.sh` | cross-compile (`--soc esp32s3|esp32s31`; per-SoC table at top; env required, no path defaults; `--c`/`--obj`/`--lib`/`--cflags` for C interop) |
@@ -84,9 +82,8 @@ workspace was removed *after* every one of its functions moved here.
    via `xTaskCreatePinnedToCore` externals are the supported escape hatch
    (exact signatures and rules in §7). Do not weaken the Pascal stubs;
    do not use Pascal threadvars in real tasks.
-3. The atomics units are frozen (§1). New shared-state code in tests/units uses
-   FreeRTOS primitives or idfheap-routed plain variables, never edits the
-   frozen unit.
+3. Atomics changes go in `units/espatomics/` per that sub-project's
+   `AGENTS.md` (§1). Do not duplicate its API docs in the parent.
 4. Test naming: trunk-derived or moved-in tests keep `t_<topic>_<what>.pas`
    + line-1 provenance comment + a row in `tests/README.md`. Never re-add
    the two trunk tests known un-compilable for this target (tw16315b
@@ -96,7 +93,7 @@ workspace was removed *after* every one of its functions moved here.
    table AND one boot is verified; otherwise mark *designed for* with the
    missing prerequisite.
 6. Keep docs honest in both directions: don't claim suite coverage that
-   doesn't exist (e.g. currently none for the frozen atomics units), and don't hide
+   doesn't exist (e.g. currently none for `espatomics`), and don't hide
    designed failures as bugs.
 
 ## 4. Environment interfaces

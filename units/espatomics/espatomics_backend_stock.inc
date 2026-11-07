@@ -1,11 +1,31 @@
-function HwReadAcquire(var Target: UInt32): UInt32; inline;
+function ReadAcquire(var Target: UInt32): UInt32; inline;
 begin
   Result := UInt32(InterlockedCompareExchange(PLongInt(@Target)^, 0, 0));
 end;
 
-procedure HwWriteRelease(var Target: UInt32; Value: UInt32); inline;
+function ReadAcquire(var Target: LongInt): LongInt; inline;
+begin
+  Result := InterlockedCompareExchange(Target, 0, 0);
+end;
+
+function ReadAcquire(var Target: Pointer): Pointer; inline;
+begin
+  Result := InterlockedCompareExchange(Target, nil, nil);
+end;
+
+procedure WriteRelease(var Target: UInt32; Value: UInt32); inline;
 begin
   InterlockedExchange(PLongInt(@Target)^, LongInt(Value));
+end;
+
+procedure WriteRelease(var Target: LongInt; Value: LongInt); inline;
+begin
+  InterlockedExchange(Target, Value);
+end;
+
+procedure WriteRelease(var Target: Pointer; Value: Pointer); inline;
+begin
+  InterlockedExchange(Target, Value);
 end;
 
 function HwExchange(var Target: UInt32; Value: UInt32): UInt32; inline;
@@ -55,16 +75,6 @@ function HwWeak(var Target: UInt32; Value, Comparand: UInt32; out Observed: UInt
 begin
   Observed := UInt32(InterlockedCompareExchange(PLongInt(@Target)^, LongInt(Value), LongInt(Comparand)));
   Result := Observed = Comparand;
-end;
-
-function HwReadAcquirePointer(var Target: Pointer): Pointer; inline;
-begin
-  Result := InterlockedCompareExchange(Target, nil, nil);
-end;
-
-procedure HwWriteReleasePointer(var Target: Pointer; Value: Pointer); inline;
-begin
-  InterlockedExchange(Target, Value);
 end;
 
 function HwWeakPointer(var Target: Pointer; Value, Comparand: Pointer;

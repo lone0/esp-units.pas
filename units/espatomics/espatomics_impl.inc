@@ -1,3 +1,4 @@
+{$IFDEF FREERTOS}
 class function TInterlockedEsp.FetchAdd(var Target: UInt32; Value: UInt32): UInt32; inline;
 begin
   Result := HwFetchAdd(Target, Value);
@@ -23,7 +24,6 @@ begin
   Result := HwFetchXor(Target, Value);
 end;
 
-{$IFDEF FREERTOS}
 class function TInterlockedEsp.BitTestAndSet(var Target: LongInt; BitOffset: TBitOffset): Boolean; inline;
 var
   Mask, PreviousValue: UInt32;
@@ -40,37 +40,6 @@ begin
   Mask := UInt32(1) shl BitOffset;
   PreviousValue := FetchAnd(PUInt32(@Target)^, not Mask);
   Result := (PreviousValue and Mask) <> 0;
-end;
-{$ENDIF}
-
-class function TInterlockedEsp.ReadAcquire(var Target: UInt32): UInt32; inline;
-begin
-  Result := HwReadAcquire(Target);
-end;
-
-class function TInterlockedEsp.ReadAcquire(var Target: LongInt): LongInt; inline;
-begin
-  Result := LongInt(ReadAcquire(PUInt32(@Target)^));
-end;
-
-class function TInterlockedEsp.ReadAcquire(var Target: Pointer): Pointer; inline;
-begin
-  Result := HwReadAcquirePointer(Target);
-end;
-
-class procedure TInterlockedEsp.WriteRelease(var Target: UInt32; Value: UInt32); inline;
-begin
-  HwWriteRelease(Target, Value);
-end;
-
-class procedure TInterlockedEsp.WriteRelease(var Target: LongInt; Value: LongInt); inline;
-begin
-  WriteRelease(PUInt32(@Target)^, UInt32(Value));
-end;
-
-class procedure TInterlockedEsp.WriteRelease(var Target: Pointer; Value: Pointer); inline;
-begin
-  HwWriteReleasePointer(Target, Value);
 end;
 
 class function TInterlockedEsp.CompareExchangeWeak(var Target: UInt32; Value, Comparand: UInt32;
@@ -93,6 +62,7 @@ class function TInterlockedEsp.CompareExchangeWeak(var Target: Pointer; Value, C
 begin
   Result := HwWeakPointer(Target, Value, Comparand, Observed);
 end;
+{$ENDIF}
 
 procedure TAtomicFlag.Init; inline;
 begin
@@ -106,5 +76,5 @@ end;
 
 procedure TAtomicFlag.Clear; inline;
 begin
-  HwWriteRelease(FValue, 0);
+  WriteRelease(FValue, 0);
 end;

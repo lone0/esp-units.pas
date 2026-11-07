@@ -1,0 +1,5 @@
+circularqueue: minimal-shape SPSC, mode=acqrel
+cores=2 items=1000000 ring=1024
+starting in 3s
+items=1000000 usec=297000 items/s=3367003 checksum=ok corrupt=0
+circularqueue done

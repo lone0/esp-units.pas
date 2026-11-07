@@ -1,0 +1,17 @@
+cq_instrcost: inline vs call instruction-cost benchmark
+cores=2 items-per-variant=1000000 variants=12
+starting in 3s
+variant=i-plain items=1000000 usec=447983 items/s=2232227 checksum=FAIL corrupt=996093
+variant=i-fence items=1000000 usec=496846 items/s=2012696 checksum=FAIL corrupt=996093
+variant=i-relacq items=1000000 usec=502626 items/s=1989550 checksum=FAIL corrupt=996093
+variant=i-aqrl items=1000000 usec=561069 items/s=1782311 checksum=FAIL corrupt=996093
+variant=i-lrsc items=1000000 usec=553374 items/s=1807096 checksum=FAIL corrupt=996093
+variant=i-lock items=1000000 usec=542949 items/s=1841793 checksum=FAIL corrupt=996093
+variant=c-plain items=1000000 usec=575232 items/s=1738429 checksum=ok corrupt=0
+variant=c-fence items=1000000 usec=677726 items/s=1475522 checksum=ok corrupt=0
+variant=c-relacq items=1000000 usec=849874 items/s=1176645 checksum=ok corrupt=0
+variant=c-aqrl items=1000000 usec=705650 items/s=1417133 checksum=ok corrupt=0
+variant=c-lrsc items=1000000 usec=697770 items/s=1433136 checksum=ok corrupt=0
+variant=c-lock items=1000000 usec=833743 items/s=1199410 checksum=ok corrupt=0
+cq_instrcost done
+_haltproc called, exit code: 0

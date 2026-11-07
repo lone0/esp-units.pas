@@ -1,0 +1,5 @@
+circularqueue: minimal-shape SPSC, mode=rtlbarrier
+cores=2 items=1000000 ring=1024
+starting in 3s
+items=1000000 usec=352888 items/s=2833760 checksum=ok corrupt=0
+circularqueue done

@@ -1,0 +1,5 @@
+dekker: dual-core SB litmus, mode=rtlbarrier
+cores=2 rounds=500000
+starting in 3s
+outcome r00=0 r01=252331 r10=243243 r11=4426 SC-violations=0
+dekker done

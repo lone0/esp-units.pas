@@ -12,10 +12,10 @@ interface
 {$IFDEF FREERTOS}
 uses
   freertosinterlocked;
-{$ELSE}
-uses
-  SyncObjs;
 {$ENDIF}
+{ Host targets compile without any uses clause: the TInterlockedEsp helper
+  wraps the FreeRTOS-only TInterlocked baseline, and the leaf primitives
+  use the System unit's Interlocked* routines directly. }
 
 {$I espatomics_interface.inc}
 
@@ -25,8 +25,6 @@ implementation
   {$I espatomics_backend_xtensa.inc}
 {$ELSEIF defined(FREERTOS) and defined(CPURV_HAS_ATOMIC)}
   {$I espatomics_backend_rv32a.inc}
-{$ELSEIF defined(FREERTOS) and defined(CPUARM_HAS_LDREX) and defined(CPUARM_HAS_DMB)}
-  {$I espatomics_backend_arm32.inc}
 {$ELSE}
 {$I espatomics_backend_stock.inc}
 {$ENDIF}

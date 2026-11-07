@@ -1,0 +1,12 @@
+fencecost: per-encoding fence cost on ESP32-S31
+iters=2000000 reps=3
+starting in 3s
+encoding       R-loop-ns/it  W-loop-ns/it  R-fence-ns  W-fence-ns
+        none            9            9           0           0
+   iorw,iorw           28           28          18          18
+       rw,rw           28           28          18          18
+        r,rw           28           28          18          18
+        rw,w           28           28          18          18
+       ir,ir           28           28          18          18
+       ow,ow           28           28          18          18
+fencecost done

@@ -1,10 +1,34 @@
-function HwReadAcquire(var Target: UInt32): UInt32; assembler; nostackframe;
+function ReadAcquire(var Target: UInt32): UInt32; assembler; nostackframe;
 asm
   lw a0, 0(a0)
   fence r, rw
 end;
 
-procedure HwWriteRelease(var Target: UInt32; Value: UInt32); assembler; nostackframe;
+function ReadAcquire(var Target: LongInt): LongInt; assembler; nostackframe;
+asm
+  lw a0, 0(a0)
+  fence r, rw
+end;
+
+function ReadAcquire(var Target: Pointer): Pointer; assembler; nostackframe;
+asm
+  lw a0, 0(a0)
+  fence r, rw
+end;
+
+procedure WriteRelease(var Target: UInt32; Value: UInt32); assembler; nostackframe;
+asm
+  fence rw, w
+  sw a1, 0(a0)
+end;
+
+procedure WriteRelease(var Target: LongInt; Value: LongInt); assembler; nostackframe;
+asm
+  fence rw, w
+  sw a1, 0(a0)
+end;
+
+procedure WriteRelease(var Target: Pointer; Value: Pointer); assembler; nostackframe;
 asm
   fence rw, w
   sw a1, 0(a0)
@@ -46,16 +70,6 @@ asm
   addi a6, x0, 1
 .LWeakFail:
   addi a0, a6, 0
-end;
-
-function HwReadAcquirePointer(var Target: Pointer): Pointer; inline;
-begin
-  Result := Pointer(HwReadAcquire(PUInt32(@Target)^));
-end;
-
-procedure HwWriteReleasePointer(var Target: Pointer; Value: Pointer); inline;
-begin
-  HwWriteRelease(PUInt32(@Target)^, UInt32(Value));
 end;
 
 function HwWeakPointer(var Target: Pointer; Value, Comparand: Pointer;
