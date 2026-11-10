@@ -1,13 +1,15 @@
 program display_native;
 
 { Pascal-native display chain demo - the "use -> one Start -> build UI"
-  shape over the boarddisplay facade (L2) and the c_lvgl subset (L1).
+  shape over the boardlvgl facade (L2) and the c_lvgl subset (L1).
 
   No C sources are linked (no --c): every UI element is created from
   Pascal, on the lvgl-s31 SDK project (ESP-Mosaico) with its software USB
   CDC console chain. The program body IS app_main (PASCALMAIN), as in the
-  bmgr-lvgl example; the facade's unit initialization has already lazily
-  initialized the three display-chain devices by the time the body runs.
+  display_lvgl example; the facade's unit initialization has already
+  lazily initialized the optional chain devices (touch, brightness) by
+  the time the body runs, and TBoardLvgl.Start brings the panel up
+  through the boarddisplay chain on the way.
 
   The red button doubles as the packed-lv_color_t ABI probe: lv_color_t
   is a 3x uint8 C struct passed by value (psABI-bitified into one
@@ -18,7 +20,7 @@ program display_native;
   own LVGL calls - the lvgl_test_ui.c ui_acquire/ui_release pattern.
 
   Build from the repo root of esp-units.pas, against the lvgl-s31 SDK
-  project (same link closure as bmgr-lvgl, but no --c):
+  project (same link closure as display_lvgl, but no --c):
 
     cd examples/display-native
     ESP_FPC_ROOT=/mnt/storage/fpc-cross \
@@ -31,13 +33,13 @@ program display_native;
   Configurable variant (values are the facade defaults shown):
 
     var
-      cfg: TBoardDisplayConfig;
+      cfg: TBoardLvglConfig;
     begin
-      cfg := TBoardDisplay.DefaultConfig;
+      cfg := TBoardLvgl.DefaultConfig;
       cfg.TaskPriority  := 5;
       cfg.Rotation      := ESP_LV_ADAPTER_ROTATE_180;
       cfg.TouchScaleY   := 1.0;
-      ret := TBoardDisplay.StartEx(cfg);
+      ret := TBoardLvgl.StartEx(cfg);
     end.
 
   idfheap comes first in uses - the IDF-backed heap manager must be
@@ -50,7 +52,7 @@ uses
   idfheap,        { MUST be first: installs the IDF heap manager }
   c_bmgr,         { L1: esp_err_t }
   c_lvgl,         { L1: LVGL 9.6 working subset }
-  boarddisplay;   { L2: facade - use = display chain initialized }
+  boardlvgl;   { L2: facade - use = display chain initialized }
 
 { FreeRTOS; pdMS_TO_TICKS(1000) = 100 ticks at this sdkconfig's
   CONFIG_FREERTOS_HZ=100 }
@@ -64,27 +66,27 @@ const
   calls exactly like lvgl_test_ui.c's event callbacks do }
 procedure OnBtnClick(e: plv_event_t); cdecl;
 begin
-  TBoardDisplay.UILock;
+  TBoardLvgl.UILock;
   if lv_event_get_code(e) = LV_EVENT_CLICKED then
     writeln(TAG, ': I button clicked');
-  TBoardDisplay.UIUnlock;
+  TBoardLvgl.UIUnlock;
 end;
 
 var
   screen, hint, btn, btn_label: plv_obj_t;
   ret: esp_err_t;
 begin
-  ret := TBoardDisplay.Start;
+  ret := TBoardLvgl.Start;
   if ret <> ESP_OK then
   begin
-    writeln(TAG, ': E TBoardDisplay.Start: ', ret);
+    writeln(TAG, ': E TBoardLvgl.Start: ', ret);
     { spin: do not halt - the RTL shutdown would tear the console down }
     while True do
       vTaskDelay(HEARTBEAT_TICKS);
   end;
 
   { build the UI from the Pascal main task - under the adapter lock }
-  TBoardDisplay.UILock;
+  TBoardLvgl.UILock;
   screen := lv_screen_active();
 
   hint := lv_label_create(screen);
@@ -103,7 +105,7 @@ begin
   lv_obj_center(btn_label);
   lv_obj_set_style_text_font(btn_label, @lv_font_montserrat_20, LV_STYLE_MAIN);
   lv_obj_add_event_cb(btn, @OnBtnClick, LV_EVENT_CLICKED, nil);
-  TBoardDisplay.UIUnlock;
+  TBoardLvgl.UIUnlock;
 
   writeln(TAG, ': I UI up; heartbeat follows (touch the button too)');
   while True do

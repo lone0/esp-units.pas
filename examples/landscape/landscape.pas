@@ -65,8 +65,10 @@ program landscape;
 
   Display adapter facts (all verified on hardware, 2026-11-08):
     - the BMGR-generated panel-io bounces PSRAM through internal RAM
-      (psram_dma_direct off); the app builds its own panel-io with the
-      flag on and its own CO5300 panel object on the same bus.
+      (psram_dma_direct off); the panel comes up through the boarddisplay
+      unit, which patches the generated config (psram_dma_direct +
+      80 MHz) via BMGR's official re-init path - the panel object stays
+      BMGR-owned.
     - the generated 40 MHz pclk is raised to 80 MHz (wire 11.5 ms per
       full frame) - the panel class standard clock.
     - draw_bitmap x_end/y_end are EXCLUSIVE in this driver (CASET gets
@@ -125,7 +127,8 @@ uses
   idfheap,           { MUST be first: installs the IDF heap manager }
   c_bmgr,            { esp_board_manager binding (units/, L1) }
   c_esp_lcd,         { esp_lcd panel ops binding (units/, L1) }
-  bmi270tilt,        { TBmi270Tilt: two tilt angles off the BMI270 (L2) }
+  boarddisplay,      { L2 panel chain: BMGR panel + psram_dma_direct/80MHz }
+  imuattitude,       { TImuAttitude: two tilt angles off the BMI270 (L2) }
   Math;              { arctan2 for the ctrl task's homing guard }
 
 { ==================================================== ESP adapter - C ABI }
@@ -146,12 +149,6 @@ function xTaskCreatePinnedToCore(task_fn: pointer; name: PChar;
   stack_depth: cuint32; parameters: pointer; priority: cuint;
   created_handle: pointer; core_id: cint): cint; cdecl; external;
 procedure vTaskDelay(ticks: cuint32); cdecl; external;
-
-{ espressif__esp_lcd_co5300 - AMOLED brightness (a vendor register call;
-  the board pack models no brightness device, and every panel re-init
-  resets the register to the driver default max) }
-function esp_lcd_panel_co5300_set_brightness(panel: esp_lcd_panel_handle_t;
-  brightness_percent: cuint8): esp_err_t; cdecl; external;
 
 { ================================================================== 94 code }
 { The 1994 declarations, verbatim and first (Pascal wants declare-before-
@@ -260,7 +257,6 @@ const
   WANDER_DIV = 25;
   HOME_MARGIN = 72;       { roam box: steer home outside 72..183 }
   HOME_RATE   = 3;        { deg per frame toward center, max }
-  BRIGHTNESS  = 60;       { percent, AMOLED unattended }
 
 type
   { periph_gpio.h - not bound in c_bmgr; only ever read for the motor }
@@ -299,7 +295,7 @@ var
   ctrl_desired: integer;           { homing target heading (deg) }
   ctrl_home: boolean;              { camera outside the roam box }
 
-  tilt: TBmi270Tilt;               { sensor = tilt steering; imu = nil ->
+  tilt: TImuAttitude;              { sensor = tilt steering; imu = nil ->
                                       the ctrl task runs the wander
                                       simulation instead }
 
@@ -359,16 +355,13 @@ begin
   until false
 end;
 
-{ everything the 94 program had no equivalent for: board bring-up, the
-  DMA-direct panel-io (the BMGR-generated one bounces PSRAM through
-  internal RAM), the TE line, the double frame buffer }
+{ everything the 94 program had no equivalent for: board bring-up (the
+  panel chain itself - BMGR device + overrides + brightness - lives in
+  the boarddisplay unit), the double frame buffer, the control task }
 procedure esp_init;
 var
   ret: esp_err_t;
-  motorh, lcdh: pointer;
-  lcd_handles: Pdev_display_lcd_handles_t;
-  cfgp: Pdev_display_lcd_config_t;
-  devcfg: dev_display_lcd_config_t;
+  motorh: pointer;
   raw16: pointer;
   b: integer;
 begin
@@ -386,72 +379,20 @@ begin
      (motorh <> nil) then
     gpio_set_level(PPeriphGpioHandle(motorh)^.gpio_num, 0);
 
-  { panel config ownership via BMGR's documented re-init path. The
-    generated io config leaves psram_dma_direct off (the SPI master
-    then bounces every 450 KiB frame through internal RAM - measured
-    40 ms/frame) and runs 40 MHz; an esp_lcd panel object binds its io
-    at creation, so patching means rebuilding: copy the generated
-    config, patch the two fields, then deinit -> override_config ->
-    init. The rebuilt panel is BMGR-owned - no duplicate object, one
-    config source (generated + APP override) }
-  ret := esp_board_manager_get_device_config(ESP_BOARD_DEVICE_NAME_DISPLAY_LCD, @cfgp);
-  if (ret <> ESP_OK) or (cfgp = nil) then
-  begin
-    writeln(TAG, ': E display_lcd config: ', ret);
-    halt
-  end;
-  devcfg := cfgp^;
-  devcfg.sub_cfg.spi.io_spi_config.flags :=
-    devcfg.sub_cfg.spi.io_spi_config.flags or SPI_FLAG_psram_dma_direct;
-  devcfg.sub_cfg.spi.io_spi_config.pclk_hz := 80000000;
-  ret := esp_board_manager_deinit_device_by_name(ESP_BOARD_DEVICE_NAME_DISPLAY_LCD);
+  { the panel chain: BMGR bring-up with this board's psram_dma_direct +
+    80 MHz overrides + the vendor-register brightness handling - the
+    whole sequence and its rationale live in the boarddisplay unit }
+  ret := TBoardDisplay.Start;
   if ret <> ESP_OK then
-  begin
-    writeln(TAG, ': E display_lcd deinit: ', ret);
-    halt
-  end;
-  ret := esp_board_device_override_config(ESP_BOARD_DEVICE_NAME_DISPLAY_LCD,
-    @devcfg, cuint16(sizeof(dev_display_lcd_config_t)));
-  if ret <> ESP_OK then
-  begin
-    writeln(TAG, ': E display_lcd override_config: ', ret);
-    halt
-  end;
-  ret := esp_board_manager_init_device_by_name(ESP_BOARD_DEVICE_NAME_DISPLAY_LCD);
-  if ret <> ESP_OK then
-  begin
-    writeln(TAG, ': E display_lcd re-init: ', ret);
-    halt
-  end;
-
-  { re-fetch: the re-init built a NEW panel object }
-  lcdh := nil;
-  ret := esp_board_manager_get_device_handle(ESP_BOARD_DEVICE_NAME_DISPLAY_LCD, @lcdh);
-  if (ret <> ESP_OK) or (lcdh = nil) then
-  begin
-    writeln(TAG, ': E display_lcd handle: ', ret);
-    halt
-  end;
-  lcd_handles := Pdev_display_lcd_handles_t(lcdh);
-  panel := lcd_handles^.panel_handle;
-  if panel = nil then
-  begin
-    writeln(TAG, ': E display_lcd panel_handle is nil');
-    halt
-  end;
-
-  { BMGR does not manage brightness on this board (no brightness device
-    in the pack; CO5300 is an AMOLED - brightness is a vendor register,
-    and every re-init resets it to the driver default max) }
-  {if esp_lcd_panel_co5300_set_brightness(panel, BRIGHTNESS) <> ESP_OK then
-    writeln(TAG, ': W set_brightness failed (running at driver default)');}
+    halt;                          { Start halts inside on failure anyway }
+  panel := TBoardDisplay.Panel;
 
   { BMI270 tilt steering: the sensor chain (open on the BMGR i2c_master
      bus at the board's 0x69, config, boot-pose baseline) lives in the
-     bmi270tilt unit; failure just means the ctrl task falls back to
+     imuattitude unit; failure just means the ctrl task falls back to
      the wander simulation. The periph name and address are board
      facts - they stay here }
-  if tilt.Init('i2c_master', BMI270_I2C_ADDR) then
+  if tilt.InitBmi270('i2c_master', BMI270_I2C_ADDR) then
     writeln(TAG, ': I BMI270 up - tilt steering, lateral zero=',
             tilt.ax0:5:2, 'g')
   else
@@ -470,7 +411,7 @@ begin
   ctrl_dturn := 0; ctrl_dx := 0; ctrl_dy := 0;
   scr := frame[0];                 { draw paints here; vga_flush flips it }
   last_us := esp_timer_get_time;
-  writeln(TAG, ': I display ready (own io psram_dma_direct, 80 MHz)');
+  writeln(TAG, ': I display ready (psram_dma_direct, 80 MHz)');
 
   { the control task always runs (sensor steering or the wander sim).
     Created LAST so everything it touches is already up }

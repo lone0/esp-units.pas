@@ -1,14 +1,16 @@
-display_native — Pascal-native display chain demo (boarddisplay facade + c_lvgl subset)
+display_native — Pascal-native display chain demo (boardlvgl facade + boarddisplay panel chain + c_lvgl subset)
 
 The "use → one Start → build UI" shape:
 
-* the **boarddisplay** facade (units/, L2): `uses boarddisplay` lazily
-  initializes the three display-chain devices (display_lcd, lcd_touch,
-  lcd_brightness) in the unit initialization; `TBoardDisplay.Start` brings
-  the esp_lvgl_adapter up, registers display + touch and starts the worker;
-  afterwards `lv_screen_active()` is live and Pascal builds UI over the
-  **c_lvgl** subset (units/, L1) under `TBoardDisplay.UILock/UIUnlock`.
-* no C sources are linked (`--c` is absent) — unlike bmgr-lvgl, where the
+* the **boardlvgl** facade (units/, L2): `uses boardlvgl` lazily
+  initializes the optional chain devices (lcd_touch, lcd_brightness) in
+  the unit initialization; `TBoardLvgl.Start` brings the panel up through
+  the **boarddisplay** panel chain (units/, L2 — psram_dma_direct +
+  80 MHz), brings the esp_lvgl_adapter up, registers display + touch and
+  starts the worker; afterwards `lv_screen_active()` is live and Pascal
+  builds UI over the **c_lvgl** subset (units/, L1) under
+  `TBoardLvgl.UILock/UIUnlock`.
+* no C sources are linked (`--c` is absent) — unlike display_lvgl, where the
   untouched C `lvgl_test_ui.c` does the LVGL work. Every element here is
   created from Pascal.
 * the red button is the **packed-lv_color_t ABI probe**: lv_color_t is a
@@ -46,16 +48,16 @@ ESP32_SDK_PROJECT=/mnt/storage/fpc-esp/lvgl-s31 \
     --lib log --lib vfs --lib esp_system
 ```
 
-Why the `--lib` set is identical to bmgr-lvgl's: `espressif__esp_board_manager`
+Why the `--lib` set is identical to display_lvgl's: `espressif__esp_board_manager`
 and `gen_bmgr_codes` are whole-archived (the registry factory tables live in
 data symbols no object pulls by reference), and the generated device-handle
 tables reference the init functions of every device the board yaml names —
 so the registry pulls the whole driver family regardless of which devices
-this program actually touches. The one difference vs bmgr-lvgl: no `--c`
+this program actually touches. The one difference vs display_lvgl: no `--c`
 (this program links no C sources) and the two snapshot .a paths stay as-is.
 
 Configurable start (the facade's value-semantics config record; defaults =
-the verified bmgr-lvgl behavior):
+the verified display_lvgl behavior):
 
 ```pascal
 var

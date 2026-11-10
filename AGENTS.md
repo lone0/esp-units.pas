@@ -21,8 +21,9 @@ workspace was removed *after* every one of its functions moved here.
      ESP32 MCUs;
   2. *utility units dedicated to ESP32* for programmer convenience:
      one unit per subdirectory under `units/`; today an IDF-heap manager
-     bridge (`idfheap`) and an atomics library for dual-core SoCs (see
-     `units/README.md` for the current list).
+     bridge (`idfheap`), an opt-in FreeRTOS thread manager (`freertos-fpc`),
+     and an atomics library for dual-core SoCs (see `units/README.md` for the
+     current list).
 - **Automation scripts** (`scripts/`) work across multiple SoCs of the
   ESP32 family (esp32s3 in QEMU today, esp32s31 on the riscv32 path via
   `run-esp-emu.sh`): they build
@@ -59,14 +60,19 @@ workspace was removed *after* every one of its functions moved here.
 | Path | What it is |
 |---|---|
 | `units/idfheap.pp` | IDF-heap memory-manager bridge (**first in uses** rule); suite-exercised every run |
+| `units/freertos-fpc/` | optional ESP-IDF FreeRTOS task/semaphore bindings + FPC thread manager; opt-in only, RTL stubs unchanged |
 | `units/espatomics/` | self-contained ESP.Atomics sub-project (§1): sources + `REQUIREMENTS` / `DESIGN` / `IMPLEMENTATION` / `AGENTS` |
 | `units/c_bmgr.pas` | L1 binding: esp_board_manager (hand-converted against the lvgl-s31 sdkconfig; registry needs whole-archive `--lib espressif__esp_board_manager --lib gen_bmgr_codes`) |
 | `units/c_lvgl_adapter.pas` | L1 binding: espressif__esp_lvgl_adapter (CONFIG-gated active surface; designated-initializer macros as field-verified Pascal record functions) |
 | `units/c_lvgl.pas` | L1 binding: LVGL 9.6 working subset (grows per business; bakes the v9 facts incl. the packed-`lv_color_t` by-value strategy — psABI-bitified cuint, **hardware-verified pure-red 2026-11-07**) |
-| `units/boarddisplay.pas` | L2 facade: use → display-chain devices auto-initialized; `TBoardDisplay.Start/StartEx(config)/Stop/UILock/UIUnlock`; value-semantics config, callbacks/TE/mono stay L1 |
+| `units/c_esp_lcd.pas` | L1 binding: esp_lcd panel ops (`esp_lcd_panel_draw_bitmap` etc.; opaque handles live in `c_bmgr`) |
+| `units/c_bmi270.pas` | L1 binding: espressif bmi270_sensor (precompiled component archive, path in its header) |
+| `units/boarddisplay.pas` | L2 panel chain (LVGL-free): `TBoardDisplay.Start` = BMGR display_lcd + `psram_dma_direct`/80MHz override via the official deinit→override_config→init re-init; `TBoardDisplay.Panel`; halts on failure |
+| `units/boardlvgl.pas` | L2 LVGL facade (ex boarddisplay, renamed 2026-11-11): use → lcd_touch/lcd_brightness lazy-init; `TBoardLvgl.Start/StartEx(config)/Stop/UILock/UIUnlock`; panel via `boarddisplay`; value-semantics config, callbacks/TE/mono stay L1 |
+| `units/imuattitude.pas` | L2 tilt angles (ex bmi270tilt, renamed 2026-11-11): `TImuAttitude.InitBmi270(periph, addr)/Read`; boot-pose baseline; roll+pitch only (yaw = not provided); consumers keep board facts (addr) app-side |
 | `units/README.md` | API docs + the **L1/L2 naming grammar** (`c_<C component>` = binding shadow, functional name = Pascal-native) + examples for published units; points at `units/espatomics/` for atomics |
 | `tests/` | the suite: 33 renamed webtbs regressions (incl. compile-only `u_generics_pubsub_events.pas`) + `t_generics_collections_tstack` (moved demo) + `t_encoding_roundtrip` (TEncoding functional); subdir `thread-stubs/` (designed-loud failures, out of stats); `run-tests.sh`, `README.md` per-test docs. Self-authored ad-hoc probes are NOT committed (policy 2026-10-24). |
-| `examples/` | unit demonstrations, read-first/run-by-hand (`idfheap-smoke.pas`, `leibniz.pas`, `pispigot-lcd.pas` + `waveshare_lcd.c`, `bmgr-lvgl/`, `display-native/` + `README.md` table); NOT part of the suite runner |
+| `examples/` | unit demonstrations, read-first/run-by-hand (`idfheap-smoke.pas`, `fpcthreads/`, `leibniz.pas`, `pispigot-lcd.pas` + `waveshare_lcd.c`, `display_lvgl/`, `display-native/` + `README.md` table); NOT part of the suite runner |
 | `scripts/build.sh` | cross-compile (`--soc esp32s3|esp32s31`; per-SoC table at top; env required, no path defaults; `--c`/`--obj`/`--lib`/`--cflags` for C interop) |
 | `scripts/mkflash.sh` | elf/bin → flash image (bootloader/PT offsets from SDK sdkconfig; app @ 0x10000). Default padding = full flash size (QEMU needs 2/4/8/16 MB); `--tight` pads to the content end only |
 | `scripts/run-qemu.sh` | image → QEMU boot (esp32s3); esp32s31 is a placeholder → `run-esp-emu.sh` |
@@ -80,12 +86,14 @@ workspace was removed *after* every one of its functions moved here.
    program follows it; the compile-only `u_generics_pubsub_events.pas`
    deliberately doesn't — do not "fix" that). Suite programs must run
    without `-Ch`.
-2. Threading contract: the **Pascal** thread API fails loud
+2. Threading contract: by default the **Pascal** thread API fails loud
    (`TThread.Create` → exception, `TEvent.WaitFor`/RTLEventWaitFor →
-   `RunError 232`, `threadvar` → 232 at first touch); raw FreeRTOS tasks
-   via `xTaskCreatePinnedToCore` externals are the supported escape hatch
-   (exact signatures and rules in §7). Do not weaken the Pascal stubs;
-   do not use Pascal threadvars in real tasks.
+   `RunError 232`, `threadvar` → 232 at first touch). Raw FreeRTOS tasks
+   via `xTaskCreatePinnedToCore` remain the low-level escape hatch (exact
+   signatures and rules in §7); `units/freertos-fpc/` is a separate, explicit
+   opt-in supplement for applications needing the supported Pascal subset.
+   Do not weaken the RTL stubs. Do not use Pascal threadvars with raw tasks;
+   the opt-in manager requires a configured FreeRTOS TLS slot.
 3. Atomics changes go in `units/espatomics/` per that sub-project's
    `AGENTS.md` (§1). Do not duplicate its API docs in the parent.
 4. Test naming: trunk-derived or moved-in tests keep `t_<topic>_<what>.pas`
@@ -109,7 +117,8 @@ workspace was removed *after* every one of its functions moved here.
 8. C components get L1 `c_<name>` bindings; Pascal-native services get
    unprefixed L2 units (grammar in `units/README.md`). Decision record
    (2026-11-07): for esp_board_manager the L2 is the **business-chain
-   facade** `boarddisplay`, and deliberately NOT an interface class (the C
+   facade** `boarddisplay` (2026-11-11 split: panel chain kept the name
+   `boarddisplay`, the LVGL facade became `boardlvgl`), and deliberately NOT an interface class (the C
    registry is global, string-keyed, refcounted — a class would invent
    ownership the C design does not have) and NOT a per-device record
    family (the only consumers' real shape is "module-level var holds the
@@ -208,6 +217,10 @@ scripts/run-esp-emu.sh examples/idfheap-smoke.elf  # S31 via esp-emu (not QEMU)
 cd tests && ./run-tests.sh                      # expect all green (see below)
 scripts/flash.sh examples/idfheap-smoke.elf     # image only (no port -> no write; --tight size ~0.3 MB, not 16 MB)
 
+# optional Pascal threading demo (manual; not part of the test suite):
+scripts/build.sh examples/fpcthreads/fpcthreads.pas
+timeout 20 scripts/run-qemu.sh examples/fpcthreads/fpcthreads.elf
+
 # designed failures (run manually, each prints its designed outcome):
 cd tests/thread-stubs
 ../scripts/build.sh t_cs_noop.pas && timeout 8 ../scripts/run-qemu.sh "$PWD/t_cs_noop.elf"
@@ -290,7 +303,14 @@ failure mirrors `ReturnNilIfGrowHeapFails`. Everything Pascal-allocated —
 `GetMem/New/SetLength/AnsiString/TStringList/generics` — routes to
 `heap_caps_malloc/free/realloc`, no special embedded style.
 
-**Threading escape hatch (real tasks, no RTL threading):**
+**Threading choices.** The default Pascal threading stubs remain loud; raw
+FreeRTOS tasks are the low-level escape hatch, and
+[`units/freertos-fpc/`](units/freertos-fpc/README.md) is a separate opt-in
+`TThreadManager` for applications that need `BeginThread`, critical sections,
+`RTLEvent`, or `threadvar`. Its limitations (notably no thread join), TLS
+requirement, and `idfheap`/unit ordering are documented with the package.
+
+**Raw FreeRTOS tasks (without the opt-in manager):**
 
 ```pascal
 type TTaskFn = procedure(arg: pointer); cdecl;   { TaskFunction_t }
@@ -304,7 +324,8 @@ function xTaskCreatePinnedToCore(fn: TTaskFn; name: pchar; stackDepth: uint32;
 - cores `0`/`1` (S3), `tskNO_AFFINITY = $7FFFFFFF`; start stacks ≥ 4096 and
   tune via the high-water mark.
 - workers must be `cdecl`; **Pascal `threadvar` is non-functional** (loud
-  `RunError 232`) — pass state via the `param` pointer and queues.
+  `RunError 232`) with the default RTL manager — pass state via the `param`
+  pointer and queues.
 - `idfheap` (heap_caps layer) IS task-safe; containers/objects are NOT —
   share them only behind `xSemaphoreCreateMutex`/`xQueue*` or a
   or an atomic-flag-style guarded window of your own.

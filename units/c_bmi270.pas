@@ -4,7 +4,7 @@
   Layer grammar (units/README.md): `c_<C component short name>` = L1
   binding - hand-converted C headers only, `cdecl; external` functions
   keep their C names; Pascal-native services live in unprefixed L2
-  units (see bmi270tilt.pas for the tilt-angle facade).
+  units (see imuattitude.pas for the tilt-angle facade).
 
   Source: managed_components/espressif__bmi270_sensor (mosaico-s31 SDK
   tree)

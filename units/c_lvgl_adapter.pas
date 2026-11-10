@@ -3,7 +3,7 @@
   (units/README.md): `c_<C component short name>` = L1 binding -
   hand-converted C headers only, `cdecl; external` functions keep their C
   names; Pascal-native services live in unprefixed L2 units (see
-  boarddisplay for the display-chain facade over this binding).
+  boardlvgl for the display-chain facade over this binding).
 
   Source: managed_components/espressif__esp_lvgl_adapter in the
   lvgl-s31 SDK tree:

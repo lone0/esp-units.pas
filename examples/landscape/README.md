@@ -5,7 +5,7 @@ original with its constants retuned to the panel (parameters only — the
 algorithm structure is untouched), driven through esp_lcd — no LVGL, no
 adapter, no C glue. Uses two units added for this app (see the repo's
 units/README.md for the L1/L2 grammar): `c_bmi270` (L1 binding of
-espressif/bmi270_sensor) and `bmi270tilt` (L2: the two tilt angles off
+espressif/bmi270_sensor) and `imuattitude` (L2: the two tilt angles off
 the accelerometer, with the boot-pose baseline and the orientation
 formulas).
 
@@ -196,6 +196,38 @@ between `Espressif_Device_<mac>-if00` (app console, 303a:1001) and
 `ESP32-S31_<mac>-if00` (ROM download, 303a:0020)). Never touch
 `ttyACM1` — a different device. Serial capture: raw fd + DTR asserted,
 RTS low.
+
+## TThread / fthreads investigation (open, 2026-11-09/10)
+
+The question "can Delphi-style TThread replace the raw
+xTaskCreatePinnedToCore?" was tested across three routes; the raw call
+stays for now. Findings:
+
+- **ccrause/fpc-esp-freertos fthreads** (a full FPC ThreadManager over
+  FreeRTOS: BeginThread/TThread/threadvars via FreeRTOS TLS), ported to
+  this tree on the `origin/ccrause/fpc-esp-freertos` branch
+  (units/freertos-fpc, correct `$7FFFFFFF` constant, idfheap
+  integration): **works on esp32s3/QEMU** (`FTHREADS_DONE`, critical
+  sections exact), **hard-hangs the system on esp32s31 hardware**
+  (BeginThread → USB stops being serviced). The S31 hang is undiagnosed
+  (flash races prevented a clean instrumented run); the S3/QEMU success
+  proves the units' Xtensa path is fine — the RISC-V/SMP path is the
+  suspect.
+- **esp-emu (S31 machine) is broken for our binaries**: even the
+  hardware-verified suite binary crashes under it — the emu's own
+  TinyUSB console task fails init (emu's OTG emulation gap) and aborts
+  the whole emulation at ~5 s; before that, the guest dies in
+  `esp_vApplicationTickHook` jumping through a garbage `tick_cb[]`
+  entry (the esp_system tick-callback array — disassembled + matched to
+  esp_system/freertos_hooks.c). The S31 machine is a private espressif
+  build (no public source at v0.51.0), so the runtime defect is not
+  fixable from our side. Do not trust esp-emu S31 results for FPC
+  binaries.
+- The raw `xTaskCreatePinnedToCore` path (current landscape) is
+  hardware-proven: 30 fps long-run, `err=0`, heap flat. The only latent
+  gap vs TThread: FPC threadvars are not relocated for the raw task
+  (harmless here — the ctrl task touches no threadvars; writeln from it
+  is avoided by design).
 
 ## Verified — on hardware (2026-11-08, ESP-Mosaico)
 

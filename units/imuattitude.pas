@@ -1,11 +1,12 @@
-{ bmi270tilt - Pascal-native tilt-angle facade (L2) over the BMI270
+{ imuattitude - Pascal-native tilt-angle facade (L2) over the BMI270
   accelerometer, for hand-held tilt applications.
 
   Semantics (the API contract - read before deciding to "fix" either
   formula; both shapes were paid for on hardware):
 
     rollDeg  lateral lean, RELATIVE TO THE POSE THE BOARD WAS IN AT
-             Init time. Init averages 16 ax samples as the lateral
+             InitBmi270 time. InitBmi270 averages 16 ax samples as the
+             lateral
              baseline (ax0), which removes both the chip's zero-g
              offset and whatever the resting surface tilts - so
              "however you prop it at power-on IS centered".
@@ -22,19 +23,26 @@
   BSP defaults, same as imu_gesture.c) - thresholds built on these
   angles are tuned against that range.
 
+  Honest boundary: this unit provides roll+pitch ONLY (accelerometer).
+  Yaw needs gyro/magnetometer fusion and is NOT provided - no promises,
+  no stubs. A different chip (QMI8658 and friends cannot reuse the
+  BMI270 driver - registers/protocol/firmware all differ) means a new
+  L1 binding plus re-checking the two formulas; the unit's semantics
+  are chip-agnostic by construction.
+
   Lifecycle: none by design. Firmware-style apps create at boot and
-  use forever; Init failure just leaves imu = nil and Read returns
+  use forever; InitBmi270 failure just leaves imu = nil and Read returns
   false - the caller decides its own fallback (an app-level wander
   simulation, a safe halt, ...).
 
-  Init depends on esp_board_manager for the bus handle (borrowed -
+  InitBmi270 depends on esp_board_manager for the bus handle (borrowed -
   BMGR owns the bus lifecycle, the repo's standing pattern); a future
   non-BMGR variant takes a bus handle directly.
 
   Uses: c_bmgr (bus handle), c_bmi270 (L1 binding). Link the
   precompiled component archive - see c_bmi270.pas for the path. }
 
-unit bmi270tilt;
+unit imuattitude;
 
 {$mode objfpc}{$H+}
 {$modeswitch advancedrecords}
@@ -45,10 +53,10 @@ uses
   c_bmgr;
 
 type
-  TBmi270Tilt = record
+  TImuAttitude = record
     imu: pointer;              { opaque bmi270 handle; nil = not opened }
     ax0: double;               { lateral baseline (g): the boot pose }
-    function Init(periph_name: PChar; addr: cuint8): boolean;
+    function InitBmi270(periph_name: PChar; addr: cuint8): boolean;
       { open on the BMGR periph named periph_name ('i2c_master' on the
         ESP-Mosaico), config accel +-4G/100Hz, enable, sample the
         lateral baseline. False = sensor unusable (imu = nil). }
@@ -65,11 +73,11 @@ uses
 const
   G_PER_COUNT = 4.0 / 32768.0;      { +-4G range, int16 counts }
 
-{ FreeRTOS pacing for Init's baseline sampling (ms == ticks at the
+{ FreeRTOS pacing for InitBmi270's baseline sampling (ms == ticks at the
   anchors' FREERTOS_HZ=1000) }
 procedure vTaskDelay(ticks: cuint32); cdecl; external;
 
-function TBmi270Tilt.Init(periph_name: PChar; addr: cuint8): boolean;
+function TImuAttitude.InitBmi270(periph_name: PChar; addr: cuint8): boolean;
 var
   bus: pointer;
   cfg: Tb2SensCfg;
@@ -113,7 +121,7 @@ begin
   Result := true
 end;
 
-function TBmi270Tilt.Read(out rollDeg, tiltDeg: double): boolean;
+function TImuAttitude.Read(out rollDeg, tiltDeg: double): boolean;
 var
   d: Tb2SensData;
   ax, ay, az: double;

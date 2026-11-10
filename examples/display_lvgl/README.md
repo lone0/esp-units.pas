@@ -1,12 +1,12 @@
-board_manager — Pascal port of lvgl-s31/main/main.c (esp_board_manager + esp_lvgl_adapter LVGL display example)
+display_lvgl — Pascal port of lvgl-s31/main/main.c (esp_board_manager + esp_lvgl_adapter LVGL display example)
 
 This example is the full Pascal/C interopproducer showcase the `esp-units.pas` repo was set up for:
 
 * a hand-converted Pascal binding (`units/c_bmgr.pas`) for the **esp_board_manager** device registry
 * a hand-converted Pascal binding (`units/c_lvgl_adapter.pas`) for the **espressif__esp_lvgl_adapter**
-* a program (`board_manager.pas`) whose statements mirror `main.c`'s `app_main` one-for-one
+* a program (`display_lvgl.pas`) whose statements mirror `main.c`'s `app_main` one-for-one
 * the untouched **C** test UI (`lvgl_test_ui.c/.h`, byte-identical snapshot of
-  `/mnt/storage/fpc-esp/lvgl-s31/main/lvgl_test_ui.c`, sha256 a0993c3e56a20fbeafe9c7e25bc86dfb)
+  `/mnt/storage/fpc-esp/lvgl-s31/main/lvgl_test_ui.c`, md5 a0993c3e56a20fbeafe9c7e25bc86dfb)
   which does the real LVGL work and is linked in via `build.sh --c`
 
 … all running on the **ESP-Mosaico** board (esp32s31) against the already-built C IDF
@@ -16,10 +16,10 @@ project at `/mnt/storage/fpc-esp/lvgl-s31`, including its software USB CDC
 Build (build-only verification; flash the Mosaico yourself):
 
 ```sh
-cd examples/bmgr-lvgl
+cd examples/display_lvgl
 ESP_FPC_ROOT=/mnt/storage/fpc-cross \
 ESP32_SDK_PROJECT=/mnt/storage/fpc-esp/lvgl-s31 \
-../../scripts/build.sh board_manager.pas --soc esp32s31 \
+../../scripts/build.sh display_lvgl.pas --soc esp32s31 \
     --c lvgl_test_ui.c \
     --lib espressif__esp_board_manager --lib gen_bmgr_codes \
     --lib lvgl__lvgl --lib espressif__esp_lvgl_adapter \
@@ -72,13 +72,13 @@ Verified - **build-only** (`flash/ser walk` happens only when the board
 is rejuvenated by hand; full build here, verification steps as performed):
 
 1. `scripts/build.sh … exit 0`: `succesfully created ESP32-S31 image`,
-   `board_manager.elf/.bin` written.
-2. In board_manager.o: every `external` decl from the two units resolves —
+   `display_lvgl.elf/.bin` written.
+2. In display_lvgl.o: every `external` decl from the two units resolves —
    `esp_board_manager_init_device_by_name`, `…get_device_handle`,
    `…get_device_config`, `…deinit_device_by_name`, `esp_lv_adapter_init/start/
    deinit/register_display/register_touch/unregister_display/
    unregister_touch`, and `lvgl_test_start` from the `--c` link.
-3. In board_manager.elf:
+3. In display_lvgl.elf:
    * `__wrap_app_main` is the real `usb_console.c` symbol: disassembly shows
      it calling `bsp_usb_console_init()` then tail-jumping to
      `ESP32S31_$$_APP_MAIN` — the FPC RTL `app_main` — whose PASCALMAIN

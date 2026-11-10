@@ -1,4 +1,4 @@
-program board_manager;
+program display_lvgl;
 
 { Pascal port of lvgl-s31/main/main.c (esp_board_manager + esp_lv_adapter
   LVGL display example) - same call sequence, same active branch for the
@@ -26,10 +26,10 @@ program board_manager;
   Build from the repo root of esp-units.pas, against the lvgl-s31 SDK
   project (example dir keeps its .ppu next to the .pas):
 
-    cd examples/bmgr-lvgl
+    cd examples/display_lvgl
     ESP_FPC_ROOT=/mnt/storage/fpc-cross \\
     ESP32_SDK_PROJECT=/mnt/storage/fpc-esp/lvgl-s31 \\
-    ../../scripts/build.sh board_manager.pas --soc esp32s31 \\
+    ../../scripts/build.sh display_lvgl.pas --soc esp32s31 \\
         --c lvgl_test_ui.c \\
         --lib espressif__esp_board_manager --lib gen_bmgr_codes \\
         --lib lvgl__lvgl --lib espressif__esp_lvgl_adapter \\

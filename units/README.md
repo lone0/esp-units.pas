@@ -109,6 +109,38 @@ program exercises it implicitly (it is first in `uses` everywhere); the pool
 used/free/size numbers it prints through `GetHeapStatus` are real
 `heap_caps_get_info` figures. Per-test details: `tests/README.md`.
 
+## `freertos-fpc/` — opt-in Pascal threading
+
+The freertos RTL deliberately leaves Pascal threading as loud stubs.
+Applications that explicitly opt in can use an application-side
+`TThreadManager` backed by ESP-IDF FreeRTOS tasks, mutexes, and binary
+semaphores, without changing the RTL.
+
+Put `idfheap` first and `fthreads` before units that initialize threading
+(especially `classes`):
+
+```pascal
+uses idfheap, fthreads, sysutils;
+```
+
+The SDK must set `CONFIG_FREERTOS_THREAD_LOCAL_STORAGE_POINTERS` to at least
+1. `BeginThread`, critical sections, `RTLEvent`, and thread-local storage are
+provided by the opt-in manager. It does not provide a thread join:
+`WaitForThreadTerminate` is not a completion wait, so synchronize through
+events or queues. Task stack sizes are in bytes.
+
+The package targets the linkable ESP-IDF 6.x FreeRTOS symbols. In
+`esp_task.pp`, `portTICK_PERIOD_MS` must match the SDK's `CONFIG_FREERTOS_HZ`
+when using timed RTLEvent waits; the Waveshare S3 project used for the example
+is configured for 1000 Hz. The working example is
+[`fpcthreads`](../examples/fpcthreads/README.md).
+
+`esp_task.pp` contains the small task/TLS API surface used by the manager;
+`esp_semphr.pp` wraps the linkable queue symbols used to implement FreeRTOS
+mutex and binary-semaphore macros; `fthreads.pp` installs the manager. None
+of these units changes the default RTL stubs unless the application includes
+`fthreads`.
+
 ## `espatomics` — ESP.Atomics sub-project
 
 Self-contained under [`espatomics/`](./espatomics/):
@@ -131,8 +163,8 @@ uses the `c` prefix for C-library bindings: `cthreads`, `cmem`, `cwstring`):
 
 | Layer | Name grammar | Nature | Units |
 |---|---|---|---|
-| L1 binding | `c_<C component short name>` | hand-converted C-header shadow: `cdecl; external` functions keep their C names; records are C-ABI-true (`{$packrecords C}`, `{$minenumsize 4}`, sizes verified against the C build) | `c_bmgr`, `c_lvgl_adapter`, `c_lvgl` |
-| L2 native | functional name, no `c_` prefix | Pascal-idiomatic service built on L1: advanced records with static methods, value-semantics config, `esp_err_t` visible, no exceptions | `boarddisplay` (the functional `idfheap` and the `espatomics` sub-project predate the grammar and are L2 by nature) |
+| L1 binding | `c_<C component short name>` | hand-converted C-header shadow: `cdecl; external` functions keep their C names; records are C-ABI-true (`{$packrecords C}`, `{$minenumsize 4}`, sizes verified against the C build) | `c_bmgr`, `c_esp_lcd`, `c_lvgl_adapter`, `c_lvgl`, `c_bmi270` |
+| L2 native | functional name, no `c_` prefix | Pascal-idiomatic service built on L1: advanced records with static methods, value-semantics config, `esp_err_t` visible, no exceptions | `boarddisplay` (panel chain), `boardlvgl` (LVGL facade), `imuattitude` (the functional `idfheap` and the `espatomics` sub-project predate the grammar and are L2 by nature) |
 
 Rules the grammar enforces:
 
@@ -179,17 +211,39 @@ records the v9 facts it bakes in: int32_t coordinates, the real symbol
 (v8's `lv_obj_is_valid` ditto), and the packed-`lv_color_t` by-value strategy
 (psABI-bitified `cuint`; no C function returning `lv_color_t` is ever bound).
 
-## `boarddisplay` — display-chain facade (L2)
+## `boarddisplay` — panel chain (L2)
 
-`uses boarddisplay` lazily initializes the three display-chain devices
-(display_lcd, lcd_touch, lcd_brightness) in the unit initialization;
-`TBoardDisplay.Start` (or `StartEx(TBoardDisplayConfig)`) brings the
-esp_lvgl_adapter up with display + touch registered and the worker running —
-then `lv_screen_active()` is live and Pascal UI code runs under
-`TBoardDisplay.UILock/UIUnlock`. `Stop` is the terminal teardown (main.c's
+The LVGL-free half of the display chain: `TBoardDisplay.Start` brings the
+BMGR `display_lcd` device up with this board's two overrides
+(`psram_dma_direct` + 80 MHz pclk) patched onto the generated config via
+BMGR's official re-init path (deinit → override_config → init — an esp_lcd
+panel object binds its io at creation, so patching means rebuilding), then
+hands out the BMGR-owned handle via `TBoardDisplay.Panel`. Halts on failure
+(landscape esp_init semantics); brightness is a CO5300 vendor register,
+carried commented exactly as landscape runs it. Consumers:
+`../examples/landscape/` (direct esp_lcd driver) and `boardlvgl`.
+
+## `boardlvgl` — LVGL display-chain facade (L2)
+
+`uses boardlvgl` lazily initializes the optional chain devices (lcd_touch,
+lcd_brightness; warn-and-continue) in the unit initialization;
+`TBoardLvgl.Start` (or `StartEx(TBoardLvglConfig)`) brings the panel up
+through the `boarddisplay` chain, then brings the esp_lvgl_adapter up with
+display + touch registered and the worker running — then
+`lv_screen_active()` is live and Pascal UI code runs under
+`TBoardLvgl.UILock/UIUnlock`. `Stop` is the terminal teardown (main.c's
 cleanup path as a function). Full-board init stays L1
 (`esp_board_manager_init`); callback hooks and TE/mono display profiles stay
 L1 (`c_lvgl_adapter`). Consumer: `../examples/display-native/`.
+
+## `imuattitude` — tilt angles (L2)
+
+`TImuAttitude.InitBmi270(periph_name, addr)` opens the BMI270 on the BMGR
+bus (borrowed handle; the bus lifecycle stays BMGR's), configures
+accelerometer +-4G/100 Hz and samples the boot-pose lateral baseline;
+`Read` returns roll (pose-relative) + tilt (gravity-absolute). Honest
+boundary: roll+pitch only — yaw needs gyro/magnetometer fusion and is not
+provided. L1 below: `c_bmi270`. Consumer: `../examples/landscape/`.
 
 ## `esp-units.pas` root
 
@@ -199,7 +253,7 @@ Where to look for what:
 
 | Directory | Content |
 |---|---|
-| `units/` | `idfheap` + self-contained `espatomics/` sub-project + L1 bindings (`c_bmgr`, `c_lvgl_adapter`, `c_lvgl`) + L2 `boarddisplay` |
+| `units/` | `idfheap` + self-contained `espatomics/` sub-project + L1 bindings (`c_bmgr`, `c_esp_lcd`, `c_lvgl_adapter`, `c_lvgl`, `c_bmi270`) + L2 (`boarddisplay` panel chain, `boardlvgl` LVGL facade, `imuattitude`) |
 | `units/espatomics/` | ESP.Atomics docs + sources (see its `AGENTS.md`) |
 | `tests/` | compiler verification + demonstration programs (`tests/README.md` per test) |
 | `scripts/` | build / QEMU / flash automation, SoC-parameterized |
