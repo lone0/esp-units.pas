@@ -405,9 +405,17 @@ function esp_board_manager_init_device_by_name(dev_name: PChar): esp_err_t; cdec
 function esp_board_manager_deinit_device_by_name(dev_name: PChar): esp_err_t; cdecl; external;
 function esp_board_manager_get_device_handle(dev_name: PChar;
   device_handle: ppvoid): esp_err_t; cdecl; external;
+function esp_board_manager_get_periph_handle(periph_name: PChar;
+  periph_handle: ppvoid): esp_err_t; cdecl; external;
 function esp_board_manager_get_device_config(dev_name: PChar;
   config: ppvoid): esp_err_t; cdecl; external;
 function esp_board_manager_get_board_info(board_info: Pesp_board_info_t): esp_err_t; cdecl; external;
+{ esp_board_device.h - write the APP-layer config copy for a device
+  (rejected while the device is initialized; the next init_device_by_name
+  builds from the effective config). config_size = the full generated
+  config record size, e.g. 108 for dev_display_lcd_config_t }
+function esp_board_device_override_config(name: PChar; config: pointer;
+  config_size: cuint16): esp_err_t; cdecl; external;
 
 { Applications normally never call these directly - init_device_by_name
   dispatches through the manager registry to the factory for the active
