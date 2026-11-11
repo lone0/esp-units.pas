@@ -32,7 +32,7 @@
     - SysRTLEventResetEvent: drain silently (upstream ThreadError on an
       already-reset event, which Classes' TMultiReadExclusiveWrite-
       Synchronizer.Create hits at construction)
-    - GetCPUCount: ESP32-S3 is dual-core
+    - GetCPUCount: esp_chip_info().cores (IDF runtime), not MCU ifdefs
     - GetFPCThreadVarBlockSize: diagnostics addition (used by
       examples/fpcthreads/fthreads-stress.pas)
 }
@@ -611,20 +611,31 @@ end;
 
 
 {$DEFINE HAS_GETCPUCOUNT}
+{ CHANGE: upstream hard-codes ESP32 → 2, else → 1. Query IDF at runtime
+  so S3 (2) / S31 (1) / future SoCs stay correct without MCU ifdefs.
+  esp_chip_info_t is 12 bytes on IDF 6.1 (cores at offset 11). }
+{$PACKRECORDS C}
+type
+  Tesp_chip_info = record
+    model: longint;
+    features: dword;
+    revision: word;
+    cores: byte;
+  end;
+{$PACKRECORDS DEFAULT}
+
+procedure esp_chip_info(var out_info: Tesp_chip_info); cdecl; external name 'esp_chip_info';
+
 function GetCPUCount: LongWord;
+var
+  info: Tesp_chip_info;
 begin
-  // FreeRTOS doesn't have a GetCPUCount equivalent...
-  {$ifdef FPC_MCU_ESP32}
-  GetCPUCount := 2;
-  {$else}
-  { CHANGE: ESP32-S3 is dual-core like the ESP32; everything else in this
-    tree (S31) is single-core }
-  {$ifdef FPC_MCU_ESP32S3}
-  GetCPUCount := 2;
-  {$else}
-  GetCPUCount := 1;
-  {$endif}
-  {$endif}
+  FillByte(info, SizeOf(info), 0);
+  esp_chip_info(info);
+  if info.cores = 0 then
+    GetCPUCount := 1
+  else
+    GetCPUCount := info.cores;
 end;
 
 
