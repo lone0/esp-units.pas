@@ -20,7 +20,7 @@ scripts/build.sh examples/pispigot-lcd.pas --c examples/waveshare_lcd.c \
 | Program | Shows | Personality |
 | --- | --- | --- |
 | [`idfheap-smoke`](#idfheap-smokepas) | `idfheap` in production shape | Proof that the pool is real |
-| [`fpcthreads/`](#fpcthreads) | `fthreads` BeginThread / CS / RTLEvent / TLS once-only | Smoke + 64-create stress for both emulators |
+| [`fpcthreads/`](#fpcthreads) | `fthreads` BeginThread / CS / RTLEvent / TLS once-only | Upstream demo (spin + blink) + 64-create stress for both emulators |
 | [`leibniz`](#leibnizpas) | float timing with `esp_timer_get_time` | Relative benchmark, not a unit demo |
 | [`pispigot-lcd`](#pispigot-lcdpas--waveshare_lcdc) | Pascal↔C + LCD console | Board-facing interop showcase |
 
@@ -61,27 +61,38 @@ SPIRAM link closure — `scripts/build.sh` handles it.
 **Purpose.** Demonstrate optional Delphi-style threading via
 `units/freertos-fpc/fthreads`. Two programs:
 
-- `fpcthreads.pas` — finite smoke: two workers, CS + `RTLEvent` → `shared=200`.
+- `fpcthreads.pas` — the upstream demo shape: 2 spin tasks via
+  `BeginThread` released by an `RTLEvent`, plus a `blink` task via
+  `fBeginThreadNamed` toggling GPIO 2 under a critical-section gate
+  (`Resume blink` / `Pause blink` every ~2 s). Runs forever.
 - `fthreads-stress.pas` — 64 `BeginThread`s (8×8 waves) with threadvars;
   asserts `GetFPCThreadVarBlockSize` stays fixed after the first create
   (guards against re-entering `InitThreadVars`).
 
-Adapted from ccrause's `fpcthreads` for IDF 6.1 + `idfheap`, trimmed for
-emulators (finite work, no GPIO, no run-time stats).
+Ported from ccrause's `fpcthreads` for IDF 6.1 + `idfheap` with the
+upstream structure kept; the necessary deviations are `{ CHANGE: ... }`-marked
+in the sources: the run-time stats table is dropped (no trace facility in
+the hello-s3/hello-s31 anchors — `uxTaskGetSystemState` not linkable), the
+core-ID line is dropped (`xPortGetCoreID` is a static inline in IDF 6.1),
+and the GPIO calls are declared locally with `gpio_config` taking
+`gpio_config_t` by reference (`constref`; by-value cdecl hands the first
+struct word to the callee).
 
-**Personality.** The “Pascal threads without touching the RTL” suite.
-Emulator-friendly: no `writeln` inside workers. Markers: `FTHREADS_DONE` /
-`FTHREADS_STRESS_DONE`.
+**Personality.** The "Pascal threads without touching the RTL" suite.
+Only the main task writes to the console. Marker: `FTHREADS_STRESS_DONE`
+(stress); the demo runs forever and is killed by `timeout` by design.
 
 **Expected output.**
 
-- Smoke S3: `CPUCount=2`, `shared=200 finished=2`, `FTHREADS_DONE`, exit 0.
-- Smoke S31: `CPUCount=1`, same shared/DONE, exit 0.
+- Demo S3/S31: `Creating fpc task 0/1`, `Starting spinTasks`,
+  `After blink thread`, then alternating `Resume blink` / `Pause blink`.
 - Stress: `TLS block size after first BeginThread=<n>`, eight `wave N done`
-  lines with the same TLS size, `shared=2560`, `FTHREADS_STRESS_DONE`, exit 0.
+  lines with the same TLS size, `shared=2560`, `FTHREADS_STRESS_DONE`, exit 0
+  (esp-emu exits via `--exit-on _haltproc`).
 
 **Pitfalls.** `uses idfheap, fthreads` early (before `classes`). Needs
-`CONFIG_FREERTOS_THREAD_LOCAL_STORAGE_POINTERS >= 1`. See
+`CONFIG_FREERTOS_THREAD_LOCAL_STORAGE_POINTERS >= 1`. S3 runs anchor on
+**hello-s3** (waveshare-s3's bootloader currently hangs this QEMU). See
 `fpcthreads/README.md` for build commands.
 
 ---
