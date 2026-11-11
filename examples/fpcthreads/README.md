@@ -21,9 +21,10 @@ necessary deviations are marked `{ CHANGE: ... }` in the sources:
   `gpio_config_t` by **reference** (`constref`), matching the C ABI — a
   by-value cdecl declaration hands the first struct word to the callee in
   a register (observed as `LoadProhibited`).
-- `portTICK_PERIOD_MS` in `esp_task` assumes `CONFIG_FREERTOS_HZ=100`,
-  correct for the hello-s3 / hello-s31 anchors used below; a 1000 Hz SDK
-  project (e.g. waveshare-s3) would run every demo timing 10x fast.
+- `portTICK_PERIOD_MS` in `esp_task` is calibrated at unit initialization
+  from the running kernel (`xPortGetTickRateHz`), so timings are correct
+  for any `CONFIG_FREERTOS_HZ` (100 Hz anchors: 10 ms/tick; 1000 Hz
+  projects like mosaico-s31/waveshare-s3: 1 ms/tick).
 
 | Program | Role |
 | --- | --- |

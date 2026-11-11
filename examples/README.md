@@ -76,7 +76,10 @@ the hello-s3/hello-s31 anchors — `uxTaskGetSystemState` not linkable), the
 core-ID line is dropped (`xPortGetCoreID` is a static inline in IDF 6.1),
 and the GPIO calls are declared locally with `gpio_config` taking
 `gpio_config_t` by reference (`constref`; by-value cdecl hands the first
-struct word to the callee).
+struct word to the callee). The tick period is calibrated at esp_task's unit
+initialization from the running kernel (`xPortGetTickRateHz`), so demo
+timings are correct for any `CONFIG_FREERTOS_HZ` (100 Hz anchors: 10
+ms/tick; 1000 Hz projects like mosaico-s31: 1 ms/tick).
 
 **Personality.** The "Pascal threads without touching the RTL" suite.
 Only the main task writes to the console. Marker: `FTHREADS_STRESS_DONE`

@@ -79,10 +79,11 @@ uses
     freertosconfig.inc; this tree has the thin esp_task / esp_semphr
     bindings instead (IDF 6.1 linkable symbols). What freertosconfig.inc
     provided maps to: pdTRUE below, portMAX_DELAY and portTICK_PERIOD_MS
-    from esp_task. Its portTICK_PERIOD_MS assumes CONFIG_FREERTOS_HZ=100 -
-    correct for the closure anchors these examples verify against
-    (hello-s3, hello-s31); a 1000 Hz SDK project (e.g. waveshare-s3)
-    would run timed waits 10x short. }
+    from esp_task - the latter is calibrated at esp_task's unit
+    initialization from the RUNNING kernel (xPortGetTickRateHz), so
+    ms->tick conversions are correct for the CONFIG_FREERTOS_HZ of
+    whatever project is linked; upstream derived it from
+    freertosconfig.inc at compile time. }
   esp_task, esp_semphr;
 
 const

@@ -11,11 +11,11 @@ program fpcthreads;
       manager; must stay first in uses), esp_task replaces the
       task/portmacro/projdefs surface.
 
-    - portTICK_PERIOD_MS / pdMS_TO_TICKS come from esp_task, which
-      assumes CONFIG_FREERTOS_HZ=100 - correct for the closure anchors
-      these examples verify against (hello-s3, hello-s31). A 1000 Hz SDK
-      project (e.g. waveshare-s3) would run every demo timing 10x fast;
-      timing only, nothing functional depends on it (see README.md).
+    - portTICK_PERIOD_MS / pdMS_TO_TICKS come from esp_task; the tick
+      period is calibrated at unit initialization from the RUNNING kernel
+      (xPortGetTickRateHz), so demo timings are correct for the
+      CONFIG_FREERTOS_HZ of whichever project is linked (100 Hz anchors:
+      10 ms/tick; 1000 Hz projects: 1 ms/tick).
 
     - upstream's printRealTimeStats (the per-task run-time stats table)
       is dropped: it needs CONFIG_FREERTOS_USE_TRACE_FACILITY, which
