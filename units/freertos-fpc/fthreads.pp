@@ -8,6 +8,7 @@
     - S3 / S31 MCU awareness for CPUCount
     - critical-section teardown uses xSemaphoreGive (not GiveRecursive)
     - ESP-IDF stack depths are bytes
+    - SysInitMultithreading once-only via InterLockedExchange (restored)
 
   This unit does NOT change the freertos RTL stubs. Opt in by putting
   idfheap then fthreads early in uses (before classes). FPCSource keeps
@@ -33,6 +34,10 @@ function fBeginThreadNamed(StackSize: PtrUInt;
   ThreadFunction: TThreadFunc; P: pointer;
   var ThreadId: TThreadID; constref aname: shortstring): TThreadID;
 
+{ Diagnostics: TLS block size after InitThreadVars. Stable across BeginThread
+  once SysInitMultithreading's once-only guard has run. }
+function GetFPCThreadVarBlockSize: dword;
+
 implementation
 
 uses
@@ -51,7 +56,8 @@ var
   FreeRTOSThreadManager: TThreadManager;
   ThreadVarBlockSize: dword = 0;
   TLSAPISupported: boolean = false;
-  TLSInitialized: boolean = false;
+  { longint-sized flag for InterLockedExchange (not a 1-byte boolean). }
+  TLSInitialized: longint = 0;
   threadCount: uint32 = 0;
 
 procedure HandleError(Errno: Longint); external name 'FPC_HANDLEERROR';
@@ -80,7 +86,7 @@ procedure SysAllocateThreadVars;
 var
   p: pointer;
 begin
-  if not (TLSAPISupported and TLSInitialized) then
+  if not (TLSAPISupported and (TLSInitialized <> 0)) then
     HandleError(3);
   p := heap_caps_malloc(ThreadVarBlockSize, TLS_CAPS);
   if p = nil then
@@ -105,10 +111,21 @@ end;
 
 procedure SysInitMultithreading;
 begin
-  TLSAPISupported := true;
-  IsMultiThread := true;
-  TLSInitialized := true;
-  InitThreadVars(@SysRelocateThreadVar);
+  { Once-only: InitThreadVars → init_all_unit_threadvars → SysInitThreadvar
+    only increments ThreadVarBlockSize. Re-entering reassigns offsets and
+    grows the block (upstream had this InterLockedExchange guard commented
+    out during a 2020 demo bring-up and never restored it). }
+  if InterLockedExchange(TLSInitialized, 1) = 0 then
+  begin
+    TLSAPISupported := true;
+    IsMultiThread := true;
+    InitThreadVars(@SysRelocateThreadVar);
+  end;
+end;
+
+function GetFPCThreadVarBlockSize: dword;
+begin
+  GetFPCThreadVarBlockSize := ThreadVarBlockSize;
 end;
 
 procedure SysFiniMultithreading;

@@ -20,7 +20,7 @@ scripts/build.sh examples/pispigot-lcd.pas --c examples/waveshare_lcd.c \
 | Program | Shows | Personality |
 | --- | --- | --- |
 | [`idfheap-smoke`](#idfheap-smokepas) | `idfheap` in production shape | Proof that the pool is real |
-| [`fpcthreads/`](#fpcthreads) | `fthreads` BeginThread / CS / RTLEvent | Finite thread smoke for both emulators |
+| [`fpcthreads/`](#fpcthreads) | `fthreads` BeginThread / CS / RTLEvent / TLS once-only | Smoke + 64-create stress for both emulators |
 | [`leibniz`](#leibnizpas) | float timing with `esp_timer_get_time` | Relative benchmark, not a unit demo |
 | [`pispigot-lcd`](#pispigot-lcdpas--waveshare_lcdc) | Pascal↔C + LCD console | Board-facing interop showcase |
 
@@ -59,21 +59,26 @@ SPIRAM link closure — `scripts/build.sh` handles it.
 ## `fpcthreads/`
 
 **Purpose.** Demonstrate optional Delphi-style threading via
-`units/freertos-fpc/fthreads`: two `BeginThread` workers increment a shared
-counter under a critical section, the last one signals an `RTLEvent`, main
-waits and checks `shared=200`. Adapted from ccrause's `fpcthreads` for
-IDF 6.1 + `idfheap`, trimmed for emulators (finite work, no GPIO, no
-run-time stats).
+`units/freertos-fpc/fthreads`. Two programs:
 
-**Personality.** The “Pascal threads without touching the RTL” smoke.
-Emulator-friendly and opinionated: no `writeln` inside workers (console I/O
-is not proven multi-task-safe). Success is a single marker line,
-`FTHREADS_DONE`.
+- `fpcthreads.pas` — finite smoke: two workers, CS + `RTLEvent` → `shared=200`.
+- `fthreads-stress.pas` — 64 `BeginThread`s (8×8 waves) with threadvars;
+  asserts `GetFPCThreadVarBlockSize` stays fixed after the first create
+  (guards against re-entering `InitThreadVars`).
+
+Adapted from ccrause's `fpcthreads` for IDF 6.1 + `idfheap`, trimmed for
+emulators (finite work, no GPIO, no run-time stats).
+
+**Personality.** The “Pascal threads without touching the RTL” suite.
+Emulator-friendly: no `writeln` inside workers. Markers: `FTHREADS_DONE` /
+`FTHREADS_STRESS_DONE`.
 
 **Expected output.**
 
-- S3 QEMU: `CPUCount=2`, `shared=200 finished=2`, `FTHREADS_DONE`, exit 0.
-- S31 esp-emu: `CPUCount=1`, same shared/DONE, exit 0.
+- Smoke S3: `CPUCount=2`, `shared=200 finished=2`, `FTHREADS_DONE`, exit 0.
+- Smoke S31: `CPUCount=1`, same shared/DONE, exit 0.
+- Stress: `TLS block size after first BeginThread=<n>`, eight `wave N done`
+  lines with the same TLS size, `shared=2560`, `FTHREADS_STRESS_DONE`, exit 0.
 
 **Pitfalls.** `uses idfheap, fthreads` early (before `classes`). Needs
 `CONFIG_FREERTOS_THREAD_LOCAL_STORAGE_POINTERS >= 1`. See
