@@ -71,7 +71,7 @@ init would otherwise overwrite the IDF manager later. `idfheap` also
 | What you do | What happens |
 |---|---|
 | `GetMem/Freemem/ReAllocMem`, `New/Dispose`, strings, objects, generics | routed to `heap_caps_malloc/free/realloc` |
-| allocation failure | `RunError 203`, or `nil` only if the program set `ReturnNilIfGrowHeapFails := true` |
+| allocation failure | `RunError 203` (Size ≠ 0), or `nil` if `ReturnNilIfGrowHeapFails`; **`GetMem(0)` → `nil`** for now (IDF `malloc(0)`; contradicts FPC non-nil contract — revisit when a real case needs it) |
 | `GetHeapStatus` / `GetFPCHeapStatus` | real IDF heap info numbers |
 | `heap_caps_*` directly (declare externals) | unaffected — same pool |
 

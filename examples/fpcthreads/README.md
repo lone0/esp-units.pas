@@ -30,6 +30,17 @@ necessary deviations are marked `{ CHANGE: ... }` in the sources:
 | --- | --- |
 | `fpcthreads.pas` | the upstream demo: 2 spin tasks started via `BeginThread` and released by an `RTLEvent`, plus a `blink` task started via `fBeginThreadNamed` that toggles GPIO 2 while gated by a critical section the main task opens/closes (`Resume blink` / `Pause blink` every ~2 s). Runs forever — kill it with a timeout |
 | `fthreads-stress.pas` | 64 `BeginThread`s (8×8 waves) + threadvars; asserts the TLS block size stays fixed after the first create → `FTHREADS_STRESS_DONE` |
+| `fthreads-heap.pas` | 2 workers concurrent `GetMem`/`FreeMem` through `idfheap` (canary paint, mixed sizes, out-of-order frees) → `FTHREADS_HEAP_DONE` |
+
+### FPCSource probes (not in the suite; temp runs)
+
+| Probe | Result under `idfheap`+`fthreads` | Note |
+| --- | --- | --- |
+| `tests/test/tclass16.pp` | PASS (S3+S31) | class `threadvar` isolation |
+| `tests/test/terecs20.pp` | PASS (S3+S31) | record class `threadvar` isolation |
+| `tests/test/units/system/twaitthread.pp` | **planned FAIL** | `SysWaitForThreadTerminate` is an installed stub (always `1`); worker `Result` / `SysEndThread` exit code not propagated — unimplemented feature, not a regression |
+| `tests/test/tmt1.pp` | PASS (S3+S31) | keeps `sysutils`; `threadcount` sized at runtime from `heap_caps` **INTERNAL** free (stacks charge internal ~24 KiB each even when PSRAM is present), capped at upstream 100 — observed `threads=10` (S3) / `12` (S31) with `stringlen=2000` |
+| `tests/webtbs/tw40838.pp` | PASS (S3+S31) | MM `InitThread`/`DoneThread` around `BeginThread`; named hooks (not anon); `freemem(getmem(0))` OK after idfheap returns nil for Size=0 (no 203; FPC non-nil contract deferred); spin on `donecalled` because join is a stub |
 
 ## Requires
 
@@ -53,6 +64,8 @@ scripts/build.sh examples/fpcthreads/fpcthreads.pas
 timeout 30 scripts/run-qemu.sh examples/fpcthreads/fpcthreads.elf
 scripts/build.sh examples/fpcthreads/fthreads-stress.pas
 timeout 40 scripts/run-qemu.sh examples/fpcthreads/fthreads-stress.elf
+scripts/build.sh examples/fpcthreads/fthreads-heap.pas
+timeout 40 scripts/run-qemu.sh examples/fpcthreads/fthreads-heap.elf
 
 # esp32s31 (esp-emu) — anchor = hello-s31 (per esp-env-esp32s31)
 esp-env-esp32s31
@@ -60,11 +73,15 @@ scripts/build.sh --soc esp32s31 examples/fpcthreads/fpcthreads.pas
 timeout 40 scripts/run-esp-emu.sh --soc esp32s31 examples/fpcthreads/fpcthreads.elf
 scripts/build.sh --soc esp32s31 examples/fpcthreads/fthreads-stress.pas
 timeout 60 scripts/run-esp-emu.sh --soc esp32s31 examples/fpcthreads/fthreads-stress.elf
+scripts/build.sh --soc esp32s31 examples/fpcthreads/fthreads-heap.pas
+timeout 60 scripts/run-esp-emu.sh --soc esp32s31 examples/fpcthreads/fthreads-heap.elf
 ```
 
 Expected markers: the demo prints `Creating fpc task 0/1`,
 `Starting spinTasks`, `After blink thread`, then alternating
 `Resume blink` / `Pause blink`; the stress prints `shared=2560`,
-stable `TLS=1864`, `fail=FALSE` and `FTHREADS_STRESS_DONE` (on esp-emu it
-exits 0 via `--exit-on _haltproc`). Verified 2026-11-12: S3 QEMU +
-S31 esp-emu, demo and stress.
+stable `TLS=1864`, `fail=FALSE` and `FTHREADS_STRESS_DONE`; the heap
+probe prints matching `alloc=`/`free=` counts and `FTHREADS_HEAP_DONE`
+(on esp-emu it exits 0 via `--exit-on _haltproc`). Verified 2026-11-12:
+S3 QEMU + S31 esp-emu, demo and stress; heap probe
+`alloc=6400 free=6400 fail=0` + `FTHREADS_HEAP_DONE` on both SoCs.
