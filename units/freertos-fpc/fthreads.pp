@@ -35,6 +35,7 @@
     - GetCPUCount: esp_chip_info().cores (IDF runtime), not MCU ifdefs
     - GetFPCThreadVarBlockSize: diagnostics addition (used by
       examples/fpcthreads/fthreads-stress.pas)
+    - SysBeginThread: remap System.DefaultStackSize → DefaultStackSize
 }
 
 unit fthreads;
@@ -328,6 +329,10 @@ var
   threadName: string[16];
   s: string[10];
 begin
+  { CHANGE: System.BeginThread (no size) passes System.DefaultStackSize
+    (4MiB here); remap to this unit's DefaultStackSize (4KiB). }
+  if StackSize = System.DefaultStackSize then
+    StackSize := DefaultStackSize;
   inc(threadCount);
   Str(threadCount, s);
   threadName := 'fpc-' + s + #0;
