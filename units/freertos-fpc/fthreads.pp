@@ -36,6 +36,10 @@
     - GetFPCThreadVarBlockSize: diagnostics addition (used by
       examples/fpcthreads/fthreads-stress.pas)
     - SysBeginThread: remap System.DefaultStackSize → DefaultStackSize
+    - Thread stdio: snapshot main TextRec(Input/Output/…) on first
+      SysInitMultithreading; re-apply in ThreadMain after TLS alloc so
+      workers get a working writeln (freertos leaves CONSOLEIO off, so
+      InitThread does not SysInitStdio; new TLS Output was FillByte junk)
 }
 
 unit fthreads;
@@ -99,9 +103,49 @@ const
 var
   FreeRTOSThreadManager: TThreadManager;
   TLSInitialized: boolean32 = false;
+  { CHANGE: non-threadvar stdio templates captured from main once Output
+    is live (chip OpenIO already replaced EmptyWrite). Copied into each
+    new task's TLS TextRecs so writeln works without -SfCONSOLEIO. }
+  StdIOTemplatesReady: boolean = false;
+  SavedInput, SavedOutput, SavedErrOutput, SavedStdOut, SavedStdErr: TextRec;
 
 procedure HandleError(Errno : Longint); external name 'FPC_HANDLEERROR';
 procedure fpc_threaderror; [external name 'FPC_THREADERROR'];
+
+procedure CaptureStdIOTemplates;
+begin
+  if StdIOTemplatesReady then
+    exit;
+  SavedInput := TextRec(Input);
+  SavedOutput := TextRec(Output);
+  SavedErrOutput := TextRec(ErrOutput);
+  SavedStdOut := TextRec(StdOut);
+  SavedStdErr := TextRec(StdErr);
+  StdIOTemplatesReady := true;
+end;
+
+procedure ApplyStdIOTemplate(var t: Text; const tmpl: TextRec);
+begin
+  TextRec(t) := tmpl;
+  { Bufptr in the snapshot points at the template's own Buffer — retarget. }
+  TextRec(t).Bufptr := @TextRec(t).Buffer;
+  TextRec(t).BufPos := 0;
+  TextRec(t).BufEnd := 0;
+end;
+
+procedure ApplyStdIOTemplates;
+begin
+  if not StdIOTemplatesReady then
+    exit;
+  ApplyStdIOTemplate(Input, SavedInput);
+  ApplyStdIOTemplate(Output, SavedOutput);
+  ApplyStdIOTemplate(ErrOutput, SavedErrOutput);
+  ApplyStdIOTemplate(StdOut, SavedStdOut);
+  ApplyStdIOTemplate(StdErr, SavedStdErr);
+  { InOutRes is a threadvar in the same TLS block; FillByte(...,3) leaves it
+    non-zero so iocheck skips/aborts writes. Desktop SysInitStdio clears it. }
+  InOutRes := 0;
+end;
 
 procedure SysInitThreadvar (var Offset: dword; Size: dword);
 begin
@@ -156,6 +200,7 @@ begin
   if p = nil then
   begin
     SysAllocateThreadVars;
+    ApplyStdIOTemplates;
     InitThread(DefaultStackSize);
     p := pvTaskGetThreadLocalStoragePointer(nil, DataIndex);
   end;
@@ -181,6 +226,10 @@ begin
     TLSAPISupported := true;
     IsMultiThread := true;
     TLSInitialized := true;
+
+    { Snapshot main stdio before InitThreadVars relocates Output into TLS.
+      By first BeginThread, chip OpenIO has already installed real putchar. }
+    CaptureStdIOTemplates;
 
     // 1. Calls init_all_unit_threadvars which
     //    a) Calls init_all_unit_threadvars which calls init_unit_threadvars in a loop which
@@ -259,6 +308,9 @@ begin
   { Allocate local thread vars, this must be the first thing,
     because the exception management and io depends on threadvars }
   SysAllocateThreadVars;
+  { CHANGE: freertos InitThread skips SysInitStdio (no -SfCONSOLEIO);
+    TLS Output is FillByte junk. Install copies of main's live TextRecs. }
+  ApplyStdIOTemplates;
   { Copy parameter to local data }
 {$ifdef DEBUG_MT}
   writeln('New thread started, initialising ...');

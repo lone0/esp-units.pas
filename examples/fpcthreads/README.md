@@ -41,6 +41,7 @@ necessary deviations are marked `{ CHANGE: ... }` in the sources:
 | `tests/test/units/system/twaitthread.pp` | **planned FAIL** | `SysWaitForThreadTerminate` is an installed stub (always `1`); worker `Result` / `SysEndThread` exit code not propagated — unimplemented feature, not a regression |
 | `tests/test/tmt1.pp` | PASS (S3+S31) | keeps `sysutils`; `threadcount` sized at runtime from `heap_caps` **INTERNAL** free (stacks charge internal ~24 KiB each even when PSRAM is present), capped at upstream 100 — observed `threads=10` (S3) / `12` (S31) with `stringlen=2000` |
 | `tests/webtbs/tw40838.pp` | PASS (S3+S31) | MM `InitThread`/`DoneThread` around `BeginThread`; named hooks (not anon); `freemem(getmem(0))` OK after idfheap returns nil for Size=0 (no 203; FPC non-nil contract deferred); spin on `donecalled` because join is a stub |
+| `tests/webtbs/tw34163.pp` | PASS (S3+S31) | after fthreads stdio template copy, worker `Output.CodePage` matches main (`0` = placeholder `DefaultSystemCodePage`); still no real OS code-page policy |
 
 ## Requires
 
