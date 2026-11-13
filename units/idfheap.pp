@@ -28,7 +28,8 @@ unit idfheap;
   heapmgr -> idfheap -> sysutils -> classes.
 
   Semantics:
-   - RunError(203) on allocation failure, like the default manager;
+   - RunError(203) on allocation failure (Size <> 0), like the default
+     manager; GetMem(0) is a deliberate exception — see IDFGetMem;
    - pointers allocated while the static manager was still installed (the
      window between heapmgr's and this unit's initialization is empty in
      practice) are delegated back to the captured
@@ -94,8 +95,19 @@ function IDFGetMem(Size: PtrUInt): pointer;
   begin
     result := heap_caps_malloc(Size, CAPS);
     if result = nil then
-      if not ReturnNilIfGrowHeapFails then
+      begin
+        { CONTRADICTION vs FPC: SysGetMem(0) is expected to return a freeable
+          non-nil pointer (rtl/inc/oldheap.inc; tests/tbs/tb0710.pp). IDF's
+          heap_caps_malloc(0) returns nil. Easy way for now: treat Size=0 as
+          "nothing allocated" and return nil without RunError(203) — same
+          posture as IDFAllocMem already takes. The caller who asked for a
+          zero-size chunk owns that nil (FreeMem(nil) is fine). When a real
+          case appears that justifies a non-nil GetMem(0), come back and
+          discuss an ultimate solution (e.g. clamp 0→1). }
+        if (Size = 0) or ReturnNilIfGrowHeapFails then
+          exit;
         RunError(203);
+      end;
   end;
 
 function IDFFreeMem(p: pointer): PtrUInt;
