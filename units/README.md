@@ -131,8 +131,8 @@ events or queues. Task stack sizes are in bytes.
 
 The package targets the linkable ESP-IDF 6.x FreeRTOS symbols. In
 `esp_task.pp`, `portTICK_PERIOD_MS` must match the SDK's `CONFIG_FREERTOS_HZ`
-when using timed RTLEvent waits; the Waveshare S3 project used for the example
-is configured for 1000 Hz. The working example is
+when using timed RTLEvent waits. The imported binding assumes a 10 ms tick.
+The working example is
 [`fpcthreads`](../examples/fpcthreads/README.md).
 
 `esp_task.pp` contains the small task/TLS API surface used by the manager;
