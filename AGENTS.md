@@ -71,7 +71,7 @@ workspace was removed *after* every one of its functions moved here.
 | `units/boardlvgl.pas` | L2 LVGL facade (ex boarddisplay, renamed 2026-11-11): use → lcd_touch/lcd_brightness lazy-init; `TBoardLvgl.Start/StartEx(config)/Stop/UILock/UIUnlock`; panel via `boarddisplay`; value-semantics config, callbacks/TE/mono stay L1 |
 | `units/imuattitude.pas` | L2 tilt angles (ex bmi270tilt, renamed 2026-11-11): `TImuAttitude.InitBmi270(periph, addr)/Read`; boot-pose baseline; roll+pitch only (yaw = not provided); consumers keep board facts (addr) app-side |
 | `units/README.md` | API docs + the **L1/L2 naming grammar** (`c_<C component>` = binding shadow, functional name = Pascal-native) + examples for published units; points at `units/espatomics/` for atomics |
-| `tests/` | the suite: 33 renamed webtbs regressions (incl. compile-only `u_generics_pubsub_events.pas`) + `t_generics_collections_tstack` (moved demo) + `t_encoding_roundtrip` (TEncoding functional); subdir `thread-stubs/` (designed-loud failures, out of stats); `run-tests.sh`, `README.md` per-test docs. Self-authored ad-hoc probes are NOT committed (policy 2026-10-24). |
+| `tests/` | the suite: 32 renamed webtbs regressions (incl. compile-only `u_generics_pubsub_events.pas`) + `t_generics_collections_tstack` (moved demo); `run-tests.sh`, `README.md` per-test docs. Self-authored cases are NOT committed (policy 2026-10-24; the self-authored `t_encoding_roundtrip` and `tests/thread-stubs/` were removed 2026-11-12 — upstream thread cases live in FPCSource `tests/test/`). |
 | `examples/` | unit demonstrations, read-first/run-by-hand (`idfheap-smoke.pas`, `fpcthreads/`, `leibniz.pas`, `pispigot-lcd.pas` + `waveshare_lcd.c`, `display_lvgl/`, `display-native/` + `README.md` table); NOT part of the suite runner |
 | `scripts/build.sh` | cross-compile (`--soc esp32s3|esp32s31`; per-SoC table at top; env required, no path defaults; `--c`/`--obj`/`--lib`/`--cflags` for C interop) |
 | `scripts/mkflash.sh` | elf/bin → flash image (bootloader/PT offsets from SDK sdkconfig; app @ 0x10000). Default padding = full flash size (QEMU needs 2/4/8/16 MB); `--tight` pads to the content end only |
@@ -220,22 +220,21 @@ scripts/flash.sh examples/idfheap-smoke.elf     # image only (no port -> no writ
 # optional Pascal threading demo (manual; not part of the test suite):
 scripts/build.sh examples/fpcthreads/fpcthreads.pas
 timeout 20 scripts/run-qemu.sh examples/fpcthreads/fpcthreads.elf
-
-# designed failures (run manually, each prints its designed outcome):
-cd tests/thread-stubs
-../scripts/build.sh t_cs_noop.pas && timeout 8 ../scripts/run-qemu.sh "$PWD/t_cs_noop.elf"
 ```
 
-The suite is **34 runtime programs + 1 compile-only** (33 webtbs programs,
+The suite is **33 runtime programs + 1 compile-only** (32 webtbs programs,
 one of them the compile-only unit, + the moved `t_generics_collections_tstack`
-demo + `t_encoding_roundtrip`). The floor is **all green**: 34 runtime PASS /
+demo; the self-authored `t_encoding_roundtrip` and `tests/thread-stubs/`
+were removed on 2026-11-12 — upstream FPCSource's own thread cases under
+`FPCSource-esp-idf/tests/test/` replace the latter). The floor is **all green**: 33 runtime PASS /
 0 CRASH / 0 COMPFAIL, with `u_generics_pubsub_events` COMPILE-ONLY (a unit —
 it builds but never boots). A full-suite green run is a per-toolchain
 milestone, not something the inventory alone guarantees. **Last full green run:
-2026-10-28, ESP-IDF 6.1 toolchain with SPIRAM SDK (34 PASS + 1 COMPILE-ONLY);
-`examples/idfheap-smoke.pas` built and booted in the same session.** Add the three
-`thread-stubs/` designed outcomes (`cs ok`, `ESyncObjectException`,
-TThread-stub exception) and the `examples/` demonstration built+booted by
+2026-10-28, ESP-IDF 6.1 toolchain with SPIRAM SDK (34 PASS + 1 COMPILE-ONLY,
+including the since-removed `t_encoding_roundtrip`);
+`examples/idfheap-smoke.pas` built and booted in the same session. 2026-11-02:
+Mosaico real-hardware run also all green (34 PASS + 1 COMPILE-ONLY).** Add the
+`examples/` demonstration built+booted by
 hand (its output is listed in `examples/README.md`). If a regression fails
 for compiler-internal reasons, verify against a known-good toolchain
 rebuild (the private toolchain workspace's build documentation) before

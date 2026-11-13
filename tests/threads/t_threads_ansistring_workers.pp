@@ -28,26 +28,24 @@ const
    threadcount = 100;
    stringlen = 10000;
 {$endif slowcpu}
-   WorkerStackSize = 16*1024;
 
 var
    finished : longint;
 threadvar
    thri : longint;
-var
-   threadID: TThreadID;
 
-{ Concurrent worker writes to the shared Text output are not thread-safe. }
 function f(p : pointer) : ptrint;
   var
      s : ansistring;
   begin
+     writeln('thread ',longint(p),' started');
      thri:=0;
      while (thri<stringlen) do
       begin
         s:=s+'1';
         inc(thri);
       end;
+     writeln('thread ',longint(p),' finished');
      InterLockedIncrement(finished);
      f:=0;
   end;
@@ -60,8 +58,7 @@ begin
    started:=0;
 
    for i:=1 to threadcount do
-     if BeginThread({$ifdef fpc}@{$endif}f,pointer(i),threadID,
-                    WorkerStackSize) <> tthreadid(0) then
+     if BeginThread({$ifdef fpc}@{$endif}f,pointer(i)) <> tthreadid(0) then
        inc(started);
 
    while volatile(finished)<started do

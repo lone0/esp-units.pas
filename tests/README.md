@@ -5,15 +5,15 @@ can do on ESP32-family MCUs. Two groups:
 
 - **t_/u_ programs** — a curated subset of the FPC trunk regression suite
   (`tests/webtbs`), renamed to descriptive names; each is a compiler-bug
-  regression or an important-capability demonstration. Own functional
-  tests (e.g. `t_encoding_roundtrip`) live here too, named meaningfully
-  from the start.
+  regression or an important-capability demonstration.
 - **No ad-hoc probe programs.** Self-authored throwaway probes are not
   committed (policy, 2026-10-24): the deleted `probe-enc`/`probe-idfheap`
-  are covered by `t_classes_minimal`+`t_encoding_roundtrip` and
-  `../examples/idfheap-smoke` respectively. Thread-contract demos live in
-  `thread-stubs/` (designed loud failures, kept out of the PASS/CRASH
-  stats); unit-API demonstrations in `../examples/`.
+  are covered by `t_classes_minimal` and `../examples/idfheap-smoke`
+  respectively. Self-authored thread-contract demos were removed on
+  2026-11-12 (policy: derive from upstream instead) — the upstream thread
+  cases live in the FPCSource tree (`tests/test/units/system/tthreadsched.pp`,
+  `twaitthread.pp`, `test/tmt1.pp`, `test/units/classes/…`); unit-API
+  demonstrations in `../examples/`.
 
 Run: `./run-tests.sh` (all) or `./run-tests.sh 't_math*.pas'` (glob), from
 `tests/`. Each program is cross-compiled with `../scripts/build.sh` and booted
@@ -33,8 +33,8 @@ tests/webtbs/tw<bugnr>.pas }` comment on line 1 of every renamed file, and the
 mapping table below. `idfheap-smoke` (in `../examples/`) is this project's
 own, named meaningfully from the start.
 
-**Memory manager.** Every runtime-tested program (and the `thread-stubs/`
-demos) has `idfheap` FIRST in its `uses` — the whole suite runs on the
+**Memory manager.** Every runtime-tested program has `idfheap` FIRST in its
+`uses` — the whole suite runs on the
 IDF-pool manager and no program carries a static `-Ch` block (the toolchain's
 `fpc.cfg` no longer contains `-Ch`); the compile-only unit never boots.
 
@@ -79,24 +79,12 @@ regressions are for: they crash on the bug they guard.
 | t_generics_dictionary_recordkey | `TObjectDictionary<record,TObject>.ContainsKey` | silent, exit 0 | heaviest heap demand in the suite (≈2.6 KiB at init/teardown on the classic manager) — natural first suspect for OOM experiments |
 | t_generics_comparer_enum | `TEqualityComparer<enum>.Default` interface plumbing | `Done`, exit 0 | — |
 | t_generics_collections_tstack | ** moved demonstration** (from the toolchain workspace's fpc-hello): `Generics.Collections.TStack<record>` push/pop/extract/peek, record-with-strings `ToString` via `Format`, enumerator support | boot banner + `Ate a pancake (Pop): Pancake with meat`, `Ate a pancake (Extract): Pancake with curds`, `Last pancake: Pancake with cherry`, `Total pancakes: 3` + 3 enumerated lines + `Enumerated pancakes: 3`, exit 0 | terminal `Readln` of the desktop original removed (QEMU serial has no stdin — use `$MODE DELPHI`; no C-style `+=`) |
-| t_encoding_roundtrip | `TEncoding` core ops across ASCII / UTF-8 (incl. CJK U+55B5) / UTF-16LE + BOM: `GetBytes`, `GetString` round-trips, `GetPreamble` | per-check `: ok` lines (6 checks) + `t_encoding roundtrip OK`, exit 0 | hex output for determinism; exercises the applied freertos-03 fix (conversions go through the widestringmanager) |
 | u_generics_pubsub_events | generics Pub/Sub **unit** — compile-only capability proof | compile-only PASS ("no output") | deliberately has no `idfheap` in uses and never runs — do not "fix" that |
 | t_nan_default_param_forward | NaN as default param + forward declaration | compile-only NORUN in trunk; here silent, exit 0 | — |
 | t_execprocess_funcresult | `ExecuteProcess` with function-result arguments | silent, exit 0 | freertos `ExecuteProcess` is a stub no-op: expect no side effects, the test guards compilation + teardown only |
 
 (The `idfheap` unit *demonstration* moved to `../examples/idfheap-smoke.pas`
 — see `../examples/README.md`; it is not part of the suite runner.)
-
-### `thread-stubs/` — designed-loud failures (outside the stats)
-
-| program | purpose | expected outcome (intentional!) | pitfall |
-|---|---|---|---|
-| t_cs_noop.pas | critical-section stub is a correct no-op for one task | `cs ok ...`, no error | a PASS-looking program: it must NOT fail |
-| t_event_waitfor.pas | `TEvent.Create` with a nil basic-event handle | `...as designed: ESyncObjectException` | do not "fix" its failure — it proves loudness |
-| t_thread_create.pas | `TThread.Create` must not pretend to thread | `...as designed: Exception (TThread stub)` | same: loudness is the contract |
-
-Run them manually (`../scripts/build.sh`, then `../scripts/run-qemu.sh` with a
-shorter timeout); details in `thread-stubs/README.md`.
 
 ---
 
@@ -117,10 +105,10 @@ an RTL problem, and therefore out of scope for this repo:
 
 ## Current state
 
-Inventory (2026-10-24, ESP-IDF-6.1 toolchain): **34 runtime programs +
-1 compile-only** --
-33 webtbs programs (incl. the compile-only unit) + the
-moved `t_generics_collections_tstack` demo + `t_encoding_roundtrip`;
+Inventory (2026-10-24, ESP-IDF-6.1 toolchain; trimmed to upstream-derived
+only on 2026-11-12): **33 runtime programs + 1 compile-only** --
+32 webtbs programs (incl. the compile-only unit) + the
+moved `t_generics_collections_tstack` demo;
 `u_generics_pubsub_events`
 is COMPILE-ONLY — a unit, so it builds but never boots; the `idfheap` unit
 demo runs as `../examples/idfheap-smoke.pas` outside the runner). Historical
@@ -150,10 +138,17 @@ the same sizes from the IDF pool, which has ~340 KiB free at program start.
 
 **Stub-threading**: no test in the top-level suite reaches RTL thread stubs
 (zero matches for `TThread|BeginThread|Synchronize|TEvent|WaitFor|Critical`
-in the sources; no `NoThreadError` in any log). The threading-RTL contract
-("unit init passes, explicit thread use fails loud") is demonstrated by
-`thread-stubs/`, which intentionally shows *designed* failures and is
-therefore kept out of the PASS/CRASH stats.
+in the sources; no `NoThreadError` in any log). The freertos RTL
+threading-RTL contract ("unit init passes, explicit thread use fails loud")
+is pinned by upstream FPCSource's own thread cases
+(`tests/test/units/system/tthreadsched.pp`, `twaitthread.pp`,
+`test/tmt1.pp`, `test/units/classes/…` — real-threading tests that run
+against an opt-in thread manager such as `../units/freertos-fpc/fthreads.pp`);
+the self-authored `thread-stubs/` contract demos were removed on 2026-11-12
+in favour of those. One verified datum from them survives this removal:
+**main-task threadvar access is benign** (primary TLS is static; the
+AllocateThreadVars/RelocateThreadVar vectors only fire for secondary
+threads, which the stub RTL refuses to create).
 
 **`idfheap` (now `../units/idfheap.pp`) — production IDF-heap manager**
 (compiles suite-wide, demonstrated by `../../examples/idfheap-smoke.pas`):

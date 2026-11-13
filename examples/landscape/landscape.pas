@@ -125,6 +125,8 @@ program landscape;
 
 uses
   idfheap,           { MUST be first: installs the IDF heap manager }
+  fthreads,          { BeginThread = the ctrl task (replaces the
+                       xTaskCreatePinnedToCore external below) }
   c_bmgr,            { esp_board_manager binding (units/, L1) }
   c_esp_lcd,         { esp_lcd panel ops binding (units/, L1) }
   boarddisplay,      { L2 panel chain: BMGR panel + psram_dma_direct/80MHz }
@@ -141,13 +143,10 @@ function gpio_set_level(gpio_num: cint; level: cuint32): esp_err_t; cdecl; exter
 function esp_timer_get_time: int64; cdecl; external;
 
 
-{ FreeRTOS - the background control task (all float math and the I2C
-  sensor read live there; the frame loop consumes ready integers).
-  IDF 6.1 carries the SMP kernel: xTaskCreate is a macro, this is the
-  real symbol. ESP-IDF task stack depth is in BYTES; pdPASS = 1 }
-function xTaskCreatePinnedToCore(task_fn: pointer; name: PChar;
-  stack_depth: cuint32; parameters: pointer; priority: cuint;
-  created_handle: pointer; core_id: cint): cint; cdecl; external;
+{ FreeRTOS - the background control task's delay (the task itself is
+  created via fthreads/BeginThread; all float math and the I2C sensor
+  read live there, the frame loop consumes ready integers).
+  ESP-IDF task stack depth is in BYTES }
 procedure vTaskDelay(ticks: cuint32); cdecl; external;
 
 { ================================================================== 94 code }
@@ -306,11 +305,12 @@ var
   math - atan2 angles, movement vector - happens HERE), the wander
   simulation when it is not. The frame loop just applies the numbers;
   it neither knows nor cares where they came from }
-procedure ctrl_task(arg: pointer); cdecl;
+function ctrl_task(arg: pointer): ptrint;
 var
   rolldeg, tiltdeg: double;
   n, desired, diff, dturn, step: integer;
 begin
+  result := 0;
   n := 0;
   repeat
     dturn := 0; step := 0;
@@ -364,6 +364,7 @@ var
   motorh: pointer;
   raw16: pointer;
   b: integer;
+  tid: TThreadID;
 begin
   if esp_board_manager_init <> ESP_OK then
   begin
@@ -414,12 +415,12 @@ begin
   writeln(TAG, ': I display ready (psram_dma_direct, 80 MHz)');
 
   { the control task always runs (sensor steering or the wander sim).
-    Created LAST so everything it touches is already up }
-  if xTaskCreatePinnedToCore(@ctrl_task, 'ctrl', 8192, nil, 1, nil,
-                             TSK_NO_AFFINITY) = 1 then
-    writeln(TAG, ': I ctrl task up')
-  else
-    writeln(TAG, ': W ctrl task failed - the camera hovers in place');
+    Created LAST so everything it touches is already up.
+    fthreads: same 8192 B stack, priority 1, tskNO_AFFINITY as the
+    xTaskCreate call had; a create failure halts with RunError(203)
+    instead of the W branch }
+  BeginThread(nil, 8192, @ctrl_task, nil, 0, tid);
+  writeln(TAG, ': I ctrl task up');
 end;
 
 { the 94 video-mode + DAC block: clear both panel buffers (the panel

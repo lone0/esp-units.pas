@@ -8,73 +8,93 @@ shape except:
 - line 1: `upstream provenance:` comment (repo rename convention)
 - `uses`: `idfheap, fthreads` first (replaces the per-platform
   `cthreads`/`athreads` pick)
-- `t_threads_ansistring_workers`: both ESP CPUs select `slowcpu` (8 workers,
-  2,000 characters each); workers use 16 KiB stacks and the main task delays
-  one FreeRTOS tick while waiting. Worker `writeln`s are omitted because the
-  shared Text output is not safe for concurrent writes.
+- `t_threads_ansistring_workers`: ESP targets select `slowcpu` (8 workers,
+  2,000 characters each); the main task waits with `vTaskDelay`
+  (SysUtils.Sleep is a no-op here). Worker `writeln`s are upstream-original
+  and working (see below).
 
-Kept OUT of the top-level suite stats (`run-tests.sh`): the point of
-these cases is to pin down what works under `fthreads` and what does
-not — failures here are findings, not suite regressions.
+Current stack: fthreads TextRec stdio templates (d6c22fc — worker stdio =
+clones of main's opened records), 4 KiB default-stack remap (82e0558),
+idfheap GetMem(0) → nil (1e07bca). RTL state: CONSOLEIO feature off,
+DefaultSystemCodePage = 0 (CP_ACP, uninitialized by decision — the
+CP_UTF8 two-line change was abandoned, see the open items).
 
-Two cases are **PLANNED FAILURES (subsystem not implemented)**, marked as
-such in their file headers: `t_threads_waitfor_exitcode` (no join in the
-RTL or fthreads) and `t_threads_output_codepage` (no per-thread stdio /
-CodePage initialization in the freertos RTL). Their deterministic failures
-are the documentation of those gaps — do not "fix" the cases; implement
-the subsystems (proposals in /tmp/threads-fix) or leave them as contract
-probes.
+Kept OUT of the top-level suite stats (`run-tests.sh`): these cases pin
+down what works under `fthreads` and what does not — failures here are
+findings, not suite regressions.
 
-Run (S3 / S31):
+## Results (2026-11-14, S3 QEMU + S31 esp-emu + Mosaico flashed)
 
-```sh
-. /mnt/storage/fpc-cross/esp-cfg/env-6.1.sh
-esp-env-esp32s3 && export ESP32_SDK_PROJECT=/mnt/storage/fpc-esp/hello-s3
-scripts/build.sh tests/threads/<case>.pp
-timeout 20 scripts/run-qemu.sh tests/threads/<case>.elf
-esp-env-esp32s31        # esp-emu exits at _haltproc
-scripts/build.sh --soc esp32s31 tests/threads/<case>.pp
-timeout 20 scripts/run-esp-emu.sh --soc esp32s31 tests/threads/<case>.elf
-```
+| case | upstream source | exercises | result |
+| --- | --- | --- | --- |
+| `t_threads_ansistring_workers` | `tests/test/tmt1.pp` | 8 workers × 2,000-char ansistring builds + **worker `writeln`** (interleaved but legible), threadvar, InterLockedIncrement, vTaskDelay-paced wait | **PASS** (S3, S31, Mosaico hw) — 16 worker lines + final `8`, exit 0 |
+| `t_threads_class_threadvar` | `tests/test/tclass16.pp` | class threadvar isolation + RTLEvent | **PASS** (S3, S31, Mosaico hw) |
+| `t_threads_record_threadvar` | `tests/test/terecs20.pp` | record threadvar isolation + RTLEvent | **PASS** (S3, S31, Mosaico hw) |
+| `t_threads_mm_hooks` | `tests/webtbs/tw40838.pp` | memory-manager InitThread/DoneThread hooks around BeginThread | **PASS** (S3 ×3, S31, Mosaico hw) — passes since idfheap returns nil for GetMem(0); race-dependent without join. Its `RelocateHeap`-hook writeln never fires (heap_caps never relocates) |
+| `t_threads_output_codepage` | `tests/webtbs/tw34163.pp` | per-thread `Output` Text record (CodePage) | **PASS (vacuous)**: worker TextRec CodePage = main's copy = DefaultSystemCodePage = 0 → 0 = 0, deterministic (verified S3 `ok`, exit 0). The codepage dimension is unimplemented by decision |
 
-Mosaico hardware: flash the `--tight` image with
+`waitfor` was removed from this suite (join declined this round); its
+contract probe lives in git history.
+
+## Worker writeln: VERIFIED WORKING
+
+The TextRec template commit (d6c22fc) fixed the historical worker-writeln
+crash: each spawned thread's stdio Text records are clones of main's
+opened records (real hooks, retargeted buffer), so `writeln` from a
+`BeginThread` worker reaches the console. Verified:
+
+- Mosaico hardware (user run): worker lines interleaved but legible.
+- S3 QEMU (re-check after a false-negative): 16
+  `thread N started/finished` lines from 8 workers, correct content,
+  main's final count `8`, exit 0.
+
+
+## Open items (in /tmp/threads-fix, ephemeral)
+
+1. **Read-only CodePage probe quirk** — `t_cp_read_only` (3-arg
+   BeginThread, worker reads `TextRec(Output).CodePage`, main prints)
+   fails with `Runtime error 203` at BeginThread on the current RTL,
+   while the write-path cases (ansistring workers) run fine at the same
+   effective 4 KiB stack. One earlier run also showed the worker reading
+   the 771 FillByte residue. Narrow probe, own RCA round.
+2. **Single-worker probes are unstable regardless of stack size** — the
+   probe series (2026-11-14): a no-op worker at the remapped 4 KiB dies
+   with `Runtime error 203`; a value-writeln worker at 16 KiB explicit
+   dies in a hardware exception (the vector layer); the SAME shapes run
+   fine in the multi-worker suite cases (8 × 4 KiB remapped: 16 worker
+   lines + the builds PASS). The instability tracks the single-worker +
+   probe-standalone configuration, not the stack size — needs the
+   esp32s3-QEMU-level debugging (gdb: the task's stack bounds + the
+   faulting PC). Worker stacks: explicit ≥16 KiB (the suite convention);
+   the multi-worker configurations verified stable.
+3. **Worker writeln on S3 QEMU: hangs in the console driver** — the same
+   finding as above, isolated by a write-path ladder (a no-op worker / a
+   raw C putchar worker / a Pascal writeln worker at 16 KiB explicit:
+   all three complete, but only the main's lines reach the serial on
+   QEMU; the Pascal writeln variant core-dumps at 4 KiB default stack).
+   esp32s3-QEMU-specific; riscv32 (S31 emu + Mosaico hw) verified working.
+4. **DefaultSystemCodePage — ABANDONED (user decision, 2026-11-14)**: the
+   CP_UTF8 initialization and the `OpenIO` CodePage assignment were lost
+   in a branch switch and will **not** be restored. `DefaultSystemCodePage`
+   stays 0 (CP_ACP, never assigned on this target) and the Text records
+   match it, so the case passes vacuously (0 = 0) — verified on S3
+   (`ok`, exit 0). The codepage dimension remains unimplemented by
+   decision; the design notes (proposal + verification record) are
+   preserved at `/mnt/storage/fpc-esp/stdio-codepage-design-discarded.md`
+   (moved there when the RTL edits were reverted).
+5. **join** — declined this round; the case and the verified prototype
+   live in git history and /tmp respectively.
+
+## Mosaico hardware
+
+Flash the `--tight` image with
 `esptool --no-stub --before default-reset --after hard-reset write-flash 0x0`
 (usb_hs_console auto-download handles the entry; port `/dev/ttyACM0` only).
+Known capture limit: sub-second case output lands before USB enumeration
+completes and is dropped — emulator verdicts are authoritative for fast
+cases; slow cases (the landscape demo, long-running workers) stream fine.
 
-| case | upstream source | exercises | result with 7064144+431cf88 (2026-11-13) | remaining gap |
-| --- | --- | --- | --- | --- |
-| `t_threads_ansistring_workers` | `tests/test/tmt1.pp` | 8 threads × 16 KiB stacks, ansistring heap in workers, threadvar, InterLockedIncrement, vTaskDelay-paced join | **PASS** (S3, S31, Mosaico flashed) | the on-disk form carries MCU adaptations (threadcount 8, explicit stacks, worker writeln removed — worker writeln is unsafe, see below) |
-| `t_threads_class_threadvar` | `tests/test/tclass16.pp` | class threadvar isolation + RTLEvent | **PASS** (S3, S31; Mosaico flashed, output pre-enumeration) | — |
-| `t_threads_record_threadvar` | `tests/test/terecs20.pp` | record threadvar isolation + RTLEvent | **PASS** (S3, S31; Mosaico flashed, output pre-enumeration) | — |
-| `t_threads_waitfor_exitcode` | `tests/test/units/system/twaitthread.pp` | WaitForThreadTerminate exit-code semantics (#16492) | **PLANNED FAILURE**: `exit code 1, expected 42` → halt(2) (S3, S31, **Mosaico captured**) | subsystem not implemented: no join in the RTL **or** fthreads — `SysWaitForThreadTerminate` stub returns 1; join prototype verified in /tmp, awaiting review |
-| `t_threads_output_codepage` | `tests/webtbs/tw34163.pp` | per-thread `Output` Text record (CodePage) | **PLANNED FAILURE**: `got 771` (= $0303, the FillByte(3) TLS residue) → halt(1) (S3, S31) | subsystem not implemented: the freertos RTL has `FPC_HAS_FEATURE_CONSOLEIO` **off** (`-SfCONSOLEIO` commented in system.cfg) so `InitThread` never runs `SysInitStdio` for workers — their stdio Text records are raw TLS bytes; and `OpenIO` never assigns CodePage. Two-part RTL patch proposed in /tmp |
-| `t_threads_mm_hooks` | `tests/webtbs/tw40838.pp` | memory-manager InitThread/DoneThread hooks around BeginThread | **PASS** (S3 ×3, S31, Mosaico flashed) | passes since idfheap returns nil for GetMem(0) — previously the worker's `getmem(0)`→RunError(203) wrote through its uninitialized TextRec (same root cause as the output_codepage/worker-writeln crashes). Without join the pass is race-dependent (worker must finish before main checks the flags) |
-
-Worker-side `writeln` (tmt1's original design) currently crashes with
-LoadProhibited for the same reason: the worker's stdio Text records are raw
-TLS bytes until the CONSOLEIO feature is enabled and the RTL is rebuilt.
-Worker-side heap allocation itself is fine (`t_worker_alloc_clean` probe:
-getmem(16)+freemem from a worker → ALLOC-OK, S31).
-| --- | --- | --- | --- | --- |
-| `t_threads_ansistring_workers` | `tests/test/tmt1.pp` | ESP targets: 8 workers × 2,000 ansistring appends, 16 KiB stacks, threadvar, InterLockedIncrement, one-tick wait | PASS: `8` on S3 QEMU and S31 esp-emu; Mosaico CDC captured `8` and `_haltproc` exit 0 (capture used a delay after workers completed) | Concurrent worker `writeln` was unsafe; `SysUtils.Sleep` is a no-op on FreeRTOS, so the test uses `vTaskDelay` |
-| `t_threads_class_threadvar` | `tests/test/tclass16.pp` | class threadvar isolation + RTLEvent | CRASH: `Runtime error 203` on S31 esp-emu and Mosaico | `BeginThread` passes stack size 0, rejected by `xTaskCreate`; explicit 16 KiB stack passes with the /tmp fix set |
-| `t_threads_record_threadvar` | `tests/test/terecs20.pp` | record threadvar isolation + RTLEvent | CRASH: `Runtime error 203` on S31 esp-emu and Mosaico | `BeginThread` passes stack size 0, rejected by `xTaskCreate`; explicit 16 KiB stack passes with the /tmp fix set |
-| `t_threads_waitfor_exitcode` | `tests/test/units/system/twaitthread.pp` | WaitForThreadTerminate exit-code semantics (#16492) | CRASH: `Runtime error 203` | F1 + F2 (no join) — **passes with the /tmp fix set** (16 KiB stack + join prototype) |
-| `t_threads_output_codepage` | `tests/webtbs/tw34163.pp` | per-thread `Output` Text record CodePage re-init | CRASH: `Runtime error 203` | F1 + F2 + F4 — after stack+join fixes it still fails with `got 771` (needs the consoleio patch) |
-| `t_threads_mm_hooks` | `tests/webtbs/tw40838.pp` | memory-manager InitThread/DoneThread hooks | CRASH: `Runtime error 203` (anonymous-function overload → DefaultStackSize 4 MiB); post-4KiB-remap: S31 `Stack protection fault` boot loop in task fpc-1, S3 halt(2) | F1 (4 MiB default, fixed by 7064144's remap) + F3 (the worker does getmem — crashes at any stack size) + F2 (no join: S3 reaches the donecalled check before the worker finishes) |
-
-All findings, patch proposals and the join prototype live in `/tmp/threads-fix/`
-(`FINDINGS.md`, `fthreads-join-prototype.diff`, `patches/`, `cases/`) — nothing
-was applied to the working tree; review before landing any of it.
-| --- | --- | --- | --- |
-| `t_threads_ansistring_workers` | `tests/test/tmt1.pp` | ESP-target slowcpu workload: 8 workers × 2,000 ansistring appends, 16 KiB stack, threadvar, InterLockedIncrement | PASS (`8`) on S3 QEMU + S31 esp-emu |
-| `t_threads_class_threadvar` | `tests/test/tclass16.pp` | class threadvar isolation + RTLEvent handoff | PASS (`Ok`) |
-| `t_threads_record_threadvar` | `tests/test/terecs20.pp` | record (advancedrecords) threadvar isolation + RTLEvent | PASS (`Ok`) |
-| `t_threads_waitfor_exitcode` | `tests/test/units/system/twaitthread.pp` | WaitForThreadTerminate exit-code semantics (#16492) | known FAIL (`exit code 1, expected 42`): fthreads has no join — SysWaitForThreadTerminate is a stub |
-| `t_threads_output_codepage` | `tests/webtbs/tw34163.pp` | per-thread `Output` Text record (CodePage re-init in the worker) | PASS (`ok`) — probes SysInitStdio on the worker's TLS |
-| `t_threads_mm_hooks` | `tests/webtbs/tw40838.pp` | memory-manager InitThread/DoneThread hooks firing on BeginThread | expected FAIL (RunError 203): upstream passes stack size 0, which FreeRTOS xTaskCreate rejects — needs a 0→default fallback in fthreads |
-
-Excluded upstream thread cases, with reasons:
+## Excluded upstream thread cases, with reasons
 
 - `tests/test/units/system/tthreadsched.pp`, `tthreadprio.pp` —
   `{ %target=linux }` (sched_setscheduler / nice via libc)
