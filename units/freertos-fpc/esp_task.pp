@@ -4,7 +4,16 @@ unit esp_task;
 
 { Thin ESP-IDF FreeRTOS task bindings for IDF 6.x.
   Only the surface needed by fthreads (+ a few helpers for examples).
-  Stack depths are in BYTES (ESP-IDF convention). }
+  Stack depths are in BYTES (ESP-IDF convention).
+
+  portTICK_PERIOD_MS is calibrated at unit initialization from the
+  RUNNING kernel (xPortGetTickRateHz, IDF 6.1), so ms->tick conversions
+  are correct for whatever CONFIG_FREERTOS_HZ the linked project uses
+  (100 Hz anchors: 10; 1000 Hz projects like mosaico-s31/waveshare-s3: 1).
+  The default value only covers a degenerate read. Upstream writes it as
+  a compile-time constant (1000 div configTICK_RATE_HZ); our units are
+  compiled per-architecture, not per-project, so the value must come from
+  the linked kernel at runtime instead. }
 
 interface
 
@@ -20,12 +29,17 @@ type
 const
   tskIDLE_PRIORITY = 0;
   tskNO_AFFINITY = TBaseType($7FFFFFFF);
-  { CONFIG_FREERTOS_HZ is typically 100 → 10 ms/tick }
-  portTICK_PERIOD_MS = 10;
   portMAX_DELAY = TTickType($FFFFFFFF);
   pdTRUE = 1;
   pdFALSE = 0;
   pdPASS = pdTRUE;
+
+var
+  { ms per FreeRTOS tick; a var (upstream has a constant) so the unit
+    initialization below can calibrate it from the linked kernel }
+  portTICK_PERIOD_MS: longword = 10;
+
+function xPortGetTickRateHz: longword; cdecl; external name 'xPortGetTickRateHz';
 
 function pdMS_TO_TICKS(ms: longword): TTickType; inline;
 
@@ -87,5 +101,11 @@ begin
     pvTaskCode, pcName, usStackDepth, pvParameters, uxPriority,
     pvCreatedTask, tskNO_AFFINITY);
 end;
+
+initialization
+  { calibrate from the RUNNING kernel (returns the linked kernel's
+    configTICK_RATE_HZ); 0 keeps the 100 Hz default }
+  if xPortGetTickRateHz > 0 then
+    portTICK_PERIOD_MS := 1000 div xPortGetTickRateHz;
 
 end.
