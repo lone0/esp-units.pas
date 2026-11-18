@@ -95,7 +95,16 @@ const
 // FreeRTOS have some TLS space per task, use DataIndex to identify the
 // location of FPC's TLS pointer in this space
 // TODO: check if FPC TLS space required can fit into the FreeRTOS TLS block, could save memory that way.
-  DataIndex: PtrUInt = 0; // Require setting "Number of thread local storage pointers" to larger than 0 under FreeRTOS options in config
+  { CHANGE: DataIndex 0 -> 1. ESP-IDF reserves FreeRTOS TLS index 0 for
+    the pthreads API (freertos Kconfig: "Index 0 is reserved for use by
+    the pthreads API thread-local-storage"; pthread_local_storage.c:
+    PTHREAD_TLS_INDEX 0) and the FreeRTOS TLS api-guide repeats "index 0
+    is reserved for ESP-IDF internal uses". lwIP sys_arch also parks
+    per-task netconn semaphores in slot 0 (sys_arch.c). Defaulting to
+    slot 0 made any pthread/lwIP touch of that slot read FPC's
+    threadvar block pointer. Index 1 is the first free slot whenever
+    CONFIG_FREERTOS_THREAD_LOCAL_STORAGE_POINTERS >= 2. }
+  DataIndex: PtrUInt = 1; // Require setting "Number of thread local storage pointers" to larger than 0 under FreeRTOS options in config
   ThreadVarBlockSize: dword = 0;
   TLSAPISupported: boolean = false;
   pdTRUE = 1;
