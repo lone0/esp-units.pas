@@ -658,10 +658,13 @@ begin
 end;
 
 
-// Timeout in ms
-procedure SysRTLEventWaitForTimeout (AEvent: PRTLEvent; Timeout: longint);
+// Timeout in ms. Returns True if the event was signaled, False on timeout.
+// Signature follows trunk TThreadManager (TRTLEventHandlerTimeout → Boolean)
+// after #41793 / InitMultiThreading landed in the FreeRTOS RTL.
+function SysRTLEventWaitForTimeout (AEvent: PRTLEvent; Timeout: longint): Boolean;
 begin
-  xSemaphoreTake(TSemaphoreHandle(AEvent), Timeout div portTICK_PERIOD_MS);
+  SysRTLEventWaitForTimeout :=
+    xSemaphoreTake(TSemaphoreHandle(AEvent), Timeout div portTICK_PERIOD_MS) = pdTRUE;
 end;
 
 
@@ -747,6 +750,10 @@ begin
     RTLEventResetEvent     := @SysRTLEventResetEvent;
     RTLEventWaitFor        := @SysRTLEventWaitFor;
     RTLEventWaitForTimeout := @SysRTLEventWaitForTimeout;
+    { #41793: arms FPC_THREADVAR_RELOCATE so foreign (C) FreeRTOS tasks that
+      touch Pascal threadvars can adopt via RelocateThreadVar. Same role as
+      cthreads.InitCTLS / win SysInitTLS. }
+    InitMultiThreading     := @SysInitMultithreading;
   end;
   SetThreadManager(FreeRTOSThreadManager);
 end;

@@ -2,18 +2,34 @@
 # FPC freertos regression-test runner (subset of FPC trunk tests/webtbs).
 #
 # For each *.pas in this dir: cross-compile via ../scripts/build.sh,
-# boot under QEMU (15 s cap), classify the serial log:
+# boot under the SoC emulator (15 s cap), classify the serial log:
 #   PASS     - image actually booted, clean boot and clean exit, no crash text
 #   CRASH    - Guru Meditation / panic / backtrace / "Runtime error" seen
-#   NOBOOT   - QEMU never got as far as running the app (imaging/emulator
+#   NOBOOT   - emulator never got as far as running the app (imaging/emulator
 #              error, or it died before the boot banner). Without this the
 #              absence of crash text would silently score such a run as PASS.
 #   COMPFAIL - program did not compile (unit missing / feature mismatch)
 #   COMPILE-ONLY - u_* unit: builds, nothing to boot
 #
-# Usage:  ./run-tests.sh              # all tests
-#         ./run-tests.sh 't_math*.pas'  # glob subset
+# Usage:  ./run-tests.sh [--soc esp32s3|esp32s31]              # all tests
+#         ./run-tests.sh [--soc esp32s31] 't_math*.pas'          # glob subset
+#
+# esp32s3  → scripts/run-qemu.sh
+# esp32s31 → scripts/run-esp-emu.sh
 cd "$(dirname "$0")" || exit 1
+
+SOC=esp32s3
+if [ "${1:-}" = "--soc" ]; then
+  [ $# -ge 2 ] || { echo "usage: $0 [--soc esp32s3|esp32s31] [glob]" >&2; exit 1; }
+  SOC=$2
+  shift 2
+fi
+case "$SOC" in
+  esp32s3)  RUNNER=../scripts/run-qemu.sh;   BUILD_SOC=(--soc esp32s3);  LOGEXT=qemu.log ;;
+  esp32s31) RUNNER=../scripts/run-esp-emu.sh; BUILD_SOC=(--soc esp32s31); LOGEXT=emu.log ;;
+  *) echo "unknown SoC: $SOC (known: esp32s3, esp32s31)" >&2; exit 1 ;;
+esac
+
 CRX='Guru|panic|Backtrace|Runtime error|SIGILL|LoadProhibited|StoreProhibited'
 # evidence that the image reached the CPU (ROM banner / IDF boot log / exit)
 BOOTED='ESP-ROM|rst:0x|Build:|_haltproc'
@@ -22,8 +38,8 @@ for f in ${1:-*.pas}; do
     [ -f "$f" ] || continue
     case "$f" in run-tests.sh) continue;; esac
     n="${f%.pas}"
-    rm -f "$n.o" "$n.ppu" "$n.elf" "$n.bin" "$n.img" "$n.flash.img" "$n.qemu.log"
-    if ! ../scripts/build.sh "$f" >"$n.clog" 2>&1; then
+    rm -f "$n.o" "$n.ppu" "$n.elf" "$n.bin" "$n.img" "$n.flash.img" "$n.qemu.log" "$n.emu.log" "$n.clog"
+    if ! ../scripts/build.sh "${BUILD_SOC[@]}" "$f" >"$n.clog" 2>&1; then
         printf '%-14s %-9s %s\n' "$n" COMPFAIL "$(grep -aE 'Fatal:|Error:' "$n.clog" | head -1 | cut -c1-60)"
         continue
     fi
@@ -34,23 +50,23 @@ for f in ${1:-*.pas}; do
         printf '%-14s %-9s %s\n' "$n" COMPILE-ONLY "ok"
         continue
     fi
-    timeout 15 ../scripts/run-qemu.sh "$PWD/$n.elf" >"$n.qemu.log" 2>&1
+    timeout 15 "$RUNNER" --soc "$SOC" "$PWD/$n.elf" >"$n.$LOGEXT" 2>&1
     rc=$?
-    if grep -aqE "$CRX" "$n.qemu.log"; then
+    if grep -aqE "$CRX" "$n.$LOGEXT"; then
         printf '%-14s %-9s %s\n' "$n" CRASH \
-          "$(grep -aE "$CRX" "$n.qemu.log" | head -1 | sed 's/\x1b\[[0-9;]*m//g' | cut -c1-50)"
-    elif ! grep -aqE "$BOOTED" "$n.qemu.log"; then
+          "$(grep -aE "$CRX" "$n.$LOGEXT" | head -1 | sed 's/\x1b\[[0-9;]*m//g' | cut -c1-50)"
+    elif ! grep -aqE "$BOOTED" "$n.$LOGEXT"; then
         # The app never reached the CPU: imaging failed, the emulator is
         # missing, or the run died before the boot banner. No crash text is
         # present in that case, so without this branch it would read as PASS.
         printf '%-14s %-9s %s\n' "$n" NOBOOT \
-          "$(sed 's/\x1b\[[0-9;]*m//g' "$n.qemu.log" | grep -av '^[[:space:]]*$' \
+          "$(sed 's/\x1b\[[0-9;]*m//g' "$n.$LOGEXT" | grep -av '^[[:space:]]*$' \
              | tail -1 | cut -c1-40) (rc=$rc)"
     else
-        h=$(grep -a '_haltproc called, exit code:' "$n.qemu.log" | tail -1 | sed 's/.*exit code:/exit:/')
+        h=$(grep -a '_haltproc called, exit code:' "$n.$LOGEXT" | tail -1 | sed 's/.*exit code:/exit:/')
         if [ -z "$h" ]; then
-          last=$(sed 's/\x1b\[[0-9;]*m//g' "$n.qemu.log" \
-                 | grep -av '^[-\[]\|^ESP-ROM\|^rst:\|^load:\|^entry\|^SPIWP\|^mode:\|^Build:\|^Adding\|^error: no such' \
+          last=$(sed 's/\x1b\[[0-9;]*m//g' "$n.$LOGEXT" \
+                 | grep -av '^[-\[]\|^ESP-ROM\|^rst:\|^load:\|^entry\|^SPIWP\|^mode:\|^Build:\|^Adding\|^error: no such\|^I (\|^W (\|^\[INFO' \
                  | tail -1 | cut -c1-40)
           h="${last:-no output}"
         fi

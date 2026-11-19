@@ -32,6 +32,7 @@ findings, not suite regressions.
 | `t_threads_record_threadvar` | `tests/test/terecs20.pp` | record threadvar isolation + RTLEvent | **PASS** (S3, S31, Mosaico hw) |
 | `t_threads_mm_hooks` | `tests/webtbs/tw40838.pp` | memory-manager InitThread/DoneThread hooks around BeginThread | **PASS** (S3 ×3, S31, Mosaico hw) — passes since idfheap returns nil for GetMem(0); race-dependent without join. Its `RelocateHeap`-hook writeln never fires (heap_caps never relocates) |
 | `t_threads_output_codepage` | `tests/webtbs/tw34163.pp` | per-thread `Output` Text record (CodePage) | **PASS (vacuous)**: worker TextRec CodePage = main's copy = DefaultSystemCodePage = 0 → 0 = 0, deterministic (verified S3 `ok`, exit 0). The codepage dimension is unimplemented by decision |
+| `t_threads_foreign_threadvar` | shaped after `tests/test/units/system/tinitmtforeign.pp` | `InitMultiThreading` then raw `xTaskCreate` (not `BeginThread`) writes a `threadvar`; main verifies its own value is unchanged | **PASS** (S3, S31) — `ok`, exit 0; needs `CONFIG_FREERTOS_THREAD_LOCAL_STORAGE_POINTERS>=2` |
 
 `waitfor` was removed from this suite (join declined this round); its
 contract probe lives in git history.
