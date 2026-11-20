@@ -26,13 +26,16 @@
     same padding gcc does (verified sizes: dev_display_lcd_config_t = 108,
     spi_sub 72, touch_config_t 108, i2c_sub 56, spi_sub 48).
 
-  All API symbols are `external` and resolve against the whole-archived
-  libespressif__esp_board_manager.a (build.sh --lib). }
+  All API symbols are `external`; {$linklib} owns only the binding's core
+  component archive. Consumers link their business-chain dependencies from
+  the corresponding L2 unit. }
 
 unit c_bmgr;
 
 {$mode objfpc}{$H+}
 {$packrecords C}
+{$linklib gen_bmgr_codes}
+{$linklib espressif__esp_board_manager}
 {$minenumsize 4}
 
 interface

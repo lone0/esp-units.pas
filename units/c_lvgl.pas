@@ -44,12 +44,13 @@
       sdkconfig (also the default); bound as an external variable whose
       address is the handle, exactly like taking &lv_font_montserrat_14.
 
-  All functions are `external` and resolve against liblvgl__lvgl.a
-  (build.sh --lib lvgl__lvgl, a plain archive - no whole-archive). }
+  All functions are `external` and resolve against liblvgl__lvgl.a through
+  the unit's {$linklib} directive (normal archive resolution). }
 
 unit c_lvgl;
 
 {$mode objfpc}{$H+}
+{$linklib lvgl__lvgl}
 
 interface
 
@@ -94,6 +95,19 @@ const
   { lv_style_selector_t: 0 = LV_PART_MAIN | LV_STATE_DEFAULT }
   LV_STYLE_MAIN = 0;
 
+  { lv_obj_flag_t (include/lvgl/core/lv_obj.h:52-56, this tree) }
+  LV_OBJ_FLAG_HIDDEN     = 1 shl 0;
+  LV_OBJ_FLAG_CLICKABLE  = 1 shl 1;
+  LV_OBJ_FLAG_SCROLLABLE = 1 shl 4;
+
+  LV_RESULT_INVALID = 0;
+  LV_RESULT_OK = 1;
+
+  { lv_color_format_t (include/lvgl/draw/lv_color.h:33+) - the value the
+    chart canvas buffer uses; pixel = Cardinal $FFRRGGBB, memory bytes
+    B,G,R,A }
+  LV_COLOR_FORMAT_ARGB8888 = $10;
+
 { ------------------------------------------------------- packed lv_color_t }
 
 { lv_color_t memory layout is blue, green, red (lv_color.h:109); packed
@@ -110,6 +124,20 @@ function lv_label_create(parent: plv_obj_t): plv_obj_t; cdecl; external;    { lv
 function lv_button_create(parent: plv_obj_t): plv_obj_t; cdecl; external;   { lv_button.h:37 }
 procedure lv_label_set_text(obj: plv_obj_t; text: PChar); cdecl; external;  { lv_label.h:94 }
 
+{ --------------------------------------------------------------- canvas }
+{ lv_canvas.h:41/62 (this tree, include/lvgl/widgets/lv_canvas.h). The
+  buffer stays caller-owned (no copy) - give it W*H*4 bytes for
+  ARGB8888; a chart unit paints straight into it and invalidates. }
+function lv_canvas_create(parent: plv_obj_t): plv_obj_t; cdecl; external;
+procedure lv_canvas_set_buffer(obj: plv_obj_t; buf: pointer;
+  w, h: cint32; cf: cint32); cdecl; external;
+
+{ one-shot redraw scheduling: lv_obj_invalidate is defined in this
+  tree's archive (lv_obj.c:2019 calls it; symbol T in liblvgl__lvgl.a) -
+  the public header spelling varies across 9.x trees, the symbol is
+  stable. }
+function lv_obj_invalidate(obj: plv_obj_t): cint; cdecl; external;
+
 { -------------------------------------------------------------- geometry }
 
 procedure lv_obj_set_pos(obj: plv_obj_t; x, y: cint32); cdecl; external;    { lv_obj_pos.h:54 }
@@ -123,6 +151,9 @@ procedure lv_obj_delete(obj: plv_obj_t); cdecl; external;                   { lv
 procedure lv_obj_clean(obj: plv_obj_t); cdecl; external;                    { lv_obj_tree.h:54 }
 function lv_obj_is_in_widget_tree(obj: plv_obj_t): cbool; cdecl; external;  { lv_obj.h:866;
   v8 name lv_obj_is_valid is a macro alias in 9.6 }
+
+procedure lv_obj_add_flag(obj: plv_obj_t; f: cuint); cdecl; external;       { include/lvgl/core/lv_obj.h:239 }
+procedure lv_obj_remove_flag(obj: plv_obj_t; f: cuint); cdecl; external;    { include/lvgl/core/lv_obj.h:248 }
 
 { ----------------------------------------------------------------- events }
 

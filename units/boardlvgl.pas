@@ -20,9 +20,10 @@
     lv_label_create(lv_screen_active());    (Pascal UI over c_lvgl)
     TBoardLvgl.UIUnlock;
 
-  - auto-init at use covers lcd_touch/lcd_brightness only (lazy
-    init_device_by_name, warn-and-continue, exactly like lvgl-s31
-    main.c); display_lcd is brought up inside Start by the boarddisplay
+  - StartEx first brings display_lcd up through boarddisplay, then
+    lazily initializes lcd_touch/lcd_brightness
+    (warn-and-continue, exactly like the lvgl-s31 example);
+    display_lcd itself is brought up inside Start by the boarddisplay
     panel chain (psram_dma_direct + 80 MHz overrides included). Full-
     board initialization (audio, buttons, battery, ...) stays L1: call
     esp_board_manager_init() from c_bmgr yourself.
@@ -42,6 +43,12 @@ unit boardlvgl;
 
 {$mode objfpc}{$H+}
 {$modeswitch advancedrecords}
+{$linklib waveshare__esp_lcd_touch_cst9217}
+{$linklib espressif__esp_lcd_touch}
+{$linklib espressif__i2c_bus}
+{$linklib esp_driver_ledc}
+{$linklib esp_hal_ledc}
+{$linklib esp_pm}
 
 interface
 
@@ -129,14 +136,32 @@ const
 function strcmp(a, b: PChar): cint; cdecl; external;
 
 var
-  { optional-device init snapshots, taken once when the unit is
-    initialized; display_lcd is not here - TBoardDisplay.Start owns it }
+  { optional-device init snapshots, taken once by StartEx after
+    display_lcd is live; display_lcd is not here -
+    TBoardDisplay.Start owns it }
   TouchInited: esp_err_t;
   BrightnessInited: esp_err_t;
+  OptionalDevicesInited: Boolean = False;
 
   FDisplay: plv_display_t = nil;
   FTouch: plv_indev_t = nil;
   FStarted: Boolean = False;
+
+procedure InitOptionalDevices;
+begin
+  if OptionalDevicesInited then
+    exit;
+  OptionalDevicesInited := True;
+  TouchInited := esp_board_manager_init_device_by_name(
+    ESP_BOARD_DEVICE_NAME_LCD_TOUCH);
+  if TouchInited <> ESP_OK then
+    writeln(TAG, ': W init lcd_touch: ', TouchInited, ', continue');
+
+  BrightnessInited := esp_board_manager_init_device_by_name(
+    ESP_BOARD_DEVICE_NAME_LCD_BRIGHTNESS);
+  if BrightnessInited <> ESP_OK then
+    writeln(TAG, ': W init lcd_brightness: ', BrightnessInited, ', continue');
+end;
 
 { --------------------------------------------------------------- TBoardLvgl }
 
@@ -192,6 +217,7 @@ begin
   ret := TBoardDisplay.Start;
   if ret <> ESP_OK then
     exit(ret);
+  InitOptionalDevices;
 
   writeln(TAG, ': I Initializing LVGL adapter...');
   adapter_config := Default(esp_lv_adapter_config_t);
@@ -309,7 +335,6 @@ begin
         writeln(TAG, ': I Touch input added');
     end;
   end;
-
   ret := esp_lv_adapter_start;
   if ret <> ESP_OK then
   begin
@@ -369,23 +394,5 @@ class function TBoardLvgl.Touch: plv_indev_t;
 begin
   Result := FTouch;
 end;
-
-initialization
-
-{ use = the optional display-chain devices are initialized: lazy
-  init_device_by_name, warn-and-continue - the lvgl-s31 main.c behavior.
-  display_lcd is deliberately absent: TBoardDisplay.Start (boarddisplay
-  panel chain) owns its whole lifecycle, overrides included.
-  Runs inside PASCALMAIN (app_main context), after the software USB
-  console wrap chain is up, so writeln is live. }
-TouchInited := esp_board_manager_init_device_by_name(
-  ESP_BOARD_DEVICE_NAME_LCD_TOUCH);
-if TouchInited <> ESP_OK then
-  writeln(TAG, ': W init lcd_touch: ', TouchInited, ', continue');
-
-BrightnessInited := esp_board_manager_init_device_by_name(
-  ESP_BOARD_DEVICE_NAME_LCD_BRIGHTNESS);
-if BrightnessInited <> ESP_OK then
-  writeln(TAG, ': W init lcd_brightness: ', BrightnessInited, ', continue');
 
 end.

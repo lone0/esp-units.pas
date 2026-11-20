@@ -17,8 +17,9 @@
     if TBoardDisplay.Start <> ESP_OK then ...
     panel := TBoardDisplay.Panel;       (feed esp_lcd_panel_draw_bitmap)
 
-  - Start runs landscape-verified sequence: copy the generated config,
-    patch psram_dma_direct + 80 MHz, then the official BMGR re-init
+  - Start first brings display_lcd up, then runs the landscape-verified
+    sequence: copy the generated config, patch psram_dma_direct + 80 MHz,
+    then the official BMGR re-init
     path (deinit -> override_config -> init - an esp_lcd panel object
     binds its io at creation, so patching means rebuilding), re-fetch
     the NEW panel object, vendor-register brightness. Every failure
@@ -37,6 +38,13 @@ unit boarddisplay;
 
 {$mode objfpc}{$H+}
 {$modeswitch advancedrecords}
+{$linklib espressif__esp_lcd_co5300}
+{$linklib esp_lcd}
+{$linklib esp_driver_i2c}
+{$linklib esp_hal_i2c}
+{$linklib esp_driver_spi}
+{$linklib esp_driver_ppa}
+{$linklib esp_hal_ppa}
 
 interface
 
@@ -84,14 +92,13 @@ begin
   if FStarted then
     exit(ESP_ERR_INVALID_STATE);
 
-  { panel config ownership via BMGR's documented re-init path. The
-    generated io config leaves psram_dma_direct off (the SPI master
-    then bounces every 450 KiB frame through internal RAM - measured
-    40 ms/frame) and runs 40 MHz; an esp_lcd panel object binds its io
-    at creation, so patching means rebuilding: copy the generated
-    config, patch the two fields, then deinit -> override_config ->
-    init. The rebuilt panel is BMGR-owned - no duplicate object, one
-    config source (generated + APP override) }
+  ret := esp_board_manager_init_device_by_name(ESP_BOARD_DEVICE_NAME_DISPLAY_LCD);
+  if ret <> ESP_OK then
+  begin
+    writeln(TAG, ': E display_lcd init: ', ret);
+    halt
+  end;
+
   ret := esp_board_manager_get_device_config(ESP_BOARD_DEVICE_NAME_DISPLAY_LCD, @cfgp);
   if (ret <> ESP_OK) or (cfgp = nil) then
   begin
@@ -122,7 +129,6 @@ begin
     halt
   end;
 
-  { re-fetch: the re-init built a NEW panel object }
   lcdh := nil;
   ret := esp_board_manager_get_device_handle(ESP_BOARD_DEVICE_NAME_DISPLAY_LCD, @lcdh);
   if (ret <> ESP_OK) or (lcdh = nil) then

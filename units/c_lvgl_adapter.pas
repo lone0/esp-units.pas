@@ -39,6 +39,9 @@ unit c_lvgl_adapter;
 
 {$mode objfpc}{$H+}
 {$packrecords C}
+{$linklib espressif__esp_lvgl_adapter}
+{$linklib esp_driver_ppa}
+{$linklib esp_hal_ppa}
 {$minenumsize 4}
 
 interface
