@@ -129,7 +129,8 @@ uses
                        xTaskCreatePinnedToCore external below) }
   c_bmgr,            { esp_board_manager binding (units/, L1) }
   c_esp_lcd,         { esp_lcd panel ops binding (units/, L1) }
-  boarddisplay,      { L2 panel chain: BMGR panel + psram_dma_direct/80MHz }
+  boarddisplay,      { L2 panel chain: BMGR panel + optional overrides }
+  board_mosaico,     { Mosaico panel policy (psram_dma_direct + 80 MHz) }
   imuattitude,       { TImuAttitude: two tilt angles off the BMI270 (L2) }
   Math;              { arctan2 for the ctrl task's homing guard }
 
@@ -380,12 +381,12 @@ begin
      (motorh <> nil) then
     gpio_set_level(PPeriphGpioHandle(motorh)^.gpio_num, 0);
 
-  { the panel chain: BMGR bring-up with this board's psram_dma_direct +
-    80 MHz overrides + the vendor-register brightness handling - the
-    whole sequence and its rationale live in the boarddisplay unit }
-  ret := TBoardDisplay.Start;
+  { the panel chain: generic boarddisplay + Mosaico pack overrides
+    (psram_dma_direct + 80 MHz). Brightness stays optional via
+    MosaicoSetBrightness when wanted. }
+  ret := TBoardDisplay.StartEx(MosaicoDisplayConfig);
   if ret <> ESP_OK then
-    halt;                          { Start halts inside on failure anyway }
+    halt;                          { StartEx halts inside on failure anyway }
   panel := TBoardDisplay.Panel;
 
   { BMI270 tilt steering: the sensor chain (open on the BMGR i2c_master

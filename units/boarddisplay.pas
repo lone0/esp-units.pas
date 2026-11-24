@@ -1,64 +1,52 @@
-{ boarddisplay - L2 panel chain: the BMGR display_lcd device brought up
-  with this board's two overrides, handing out the esp_lcd panel handle.
-  LVGL-free on purpose: this is the half of the display chain that does
-  not know LVGL exists (landscape drives esp_lcd directly; the LVGL
-  facade boardlvgl sits on top of this unit for the adapter route).
+{ boarddisplay - L2 panel chain: bring up BMGR's display_lcd device and
+  hand out the esp_lcd panel handle. LVGL-free on purpose (landscape
+  drives esp_lcd directly; boardlvgl sits on top for the adapter route).
 
-  Layer grammar (units/README.md): unprefixed functional unit name = L2
-  Pascal-native service built on the L1 bindings. The API is advanced-
-  record static methods; esp_err_t stays visible; no exceptions; the
-  rebuilt panel stays BMGR-owned - the unit never duplicates objects or
-  config sources.
+  Board-agnostic: no panel-chip {$linklib}. The SDK project's yaml /
+  gen_bmgr_codes + the app's --lib line resolve CO5300 / whatever IC.
+  Panel policy (psram_dma_direct, pclk) is a value-semantics config;
+  DefaultConfig = "use BMGR-generated defaults". Board packs (see
+  board_mosaico) or apps supply overrides via StartEx.
 
   Contract:
 
-    uses boarddisplay;                  (panel chain, one Start)
-    ...
-    if TBoardDisplay.Start <> ESP_OK then ...
-    panel := TBoardDisplay.Panel;       (feed esp_lcd_panel_draw_bitmap)
+    uses boarddisplay;
+    if TBoardDisplay.Start <> ESP_OK then ...          { BMGR defaults }
+    if TBoardDisplay.StartEx(cfg) <> ESP_OK then ...  { with overrides }
+    panel := TBoardDisplay.Panel;
 
-  - Start first brings display_lcd up, then runs the landscape-verified
-    sequence: copy the generated config, patch psram_dma_direct + 80 MHz,
-    then the official BMGR re-init
-    path (deinit -> override_config -> init - an esp_lcd panel object
-    binds its io at creation, so patching means rebuilding), re-fetch
-    the NEW panel object, vendor-register brightness. Every failure
-    writeln's and halts - a panel that did not come up leaves nothing
-    sensible to return to (landscape esp_init semantics).
-  - the override is unconditional and is exactly what landscape runs
-    on hardware; callers that want the generated defaults (40 MHz,
-    io-bounced PSRAM) should not use this unit.
-  - brightness: BMGR does not manage it on this board (no brightness
-    device in the pack; CO5300 is an AMOLED - brightness is a vendor
-    register, and every re-init resets it to the driver default max).
-    The register call is carried commented, exactly as landscape runs
-    it (driver default max). }
+  StartEx reads display_lcd config, optionally patches, override_config
+  then init once (panel IO binds at creation - override before first
+  init; avoids the init→deinit→re-init hang under esp32sim). }
 
 unit boarddisplay;
 
 {$mode objfpc}{$H+}
 {$modeswitch advancedrecords}
-{$linklib espressif__esp_lcd_co5300}
-{$linklib esp_lcd}
-{$linklib esp_driver_i2c}
-{$linklib esp_hal_i2c}
-{$linklib esp_driver_spi}
-{$linklib esp_driver_ppa}
-{$linklib esp_hal_ppa}
+{ Transport archives (esp_lcd, spi, i2c, ppa) stay on the app --lib
+  line — same rule as chip drivers. No {$linklib} here. }
 
 interface
 
 uses
-  c_bmgr;  { esp_err_t, device-name constants, dev_display_lcd_* types,
-             SPI flags, BMGR API, esp_lcd opaque handles }
+  c_bmgr;
 
 type
+  { Value-semantics panel policy. Defaults leave the BMGR-generated
+    display_lcd config untouched. }
+  TBoardDisplayConfig = record
+    { OR SPI_FLAG_psram_dma_direct into io_spi_config.flags when True }
+    OverridePsramDmaDirect: Boolean;
+    { When non-zero, set io_spi_config.pclk_hz to this value (Hz).
+      0 = leave the generated clock alone. }
+    PclkHz: cuint32;
+  end;
+
   TBoardDisplay = record
   public
-    { bring the panel up (see the unit header); stores the handle }
-    class function Start: esp_err_t; static;
-
-    { the BMGR-owned panel handle; nil before Start }
+    class function DefaultConfig: TBoardDisplayConfig; static;
+    class function Start: esp_err_t; static; overload;
+    class function StartEx(const AConfig: TBoardDisplayConfig): esp_err_t; static; overload;
     class function Panel: esp_lcd_panel_handle_t; static;
   end;
 
@@ -67,65 +55,62 @@ implementation
 const
   TAG = 'boarddisplay';
 
-  BRIGHTNESS = 60;       { percent, AMOLED unattended (landscape value) }
-
-{ espressif__esp_lcd_co5300 - AMOLED brightness (a vendor register call;
-  the board pack models no brightness device, and every panel re-init
-  resets the register to the driver default max) }
-function esp_lcd_panel_co5300_set_brightness(panel: esp_lcd_panel_handle_t;
-  brightness_percent: cuint8): esp_err_t; cdecl; external;
-
 var
   FPanel: esp_lcd_panel_handle_t = nil;
   FStarted: Boolean = False;
 
-{ --------------------------------------------------------------- TBoardDisplay }
+class function TBoardDisplay.DefaultConfig: TBoardDisplayConfig;
+begin
+  Result := Default(TBoardDisplayConfig);
+  Result.OverridePsramDmaDirect := False;
+  Result.PclkHz := 0;
+end;
 
 class function TBoardDisplay.Start: esp_err_t;
+begin
+  Result := StartEx(DefaultConfig);
+end;
+
+class function TBoardDisplay.StartEx(const AConfig: TBoardDisplayConfig): esp_err_t;
 var
   ret: esp_err_t;
   cfgp: Pdev_display_lcd_config_t;
   devcfg: dev_display_lcd_config_t;
   lcdh: pointer;
   lcd_handles: Pdev_display_lcd_handles_t;
+  need_override: Boolean;
 begin
   if FStarted then
     exit(ESP_ERR_INVALID_STATE);
+
+  need_override := AConfig.OverridePsramDmaDirect or (AConfig.PclkHz <> 0);
+  if need_override then
+  begin
+    ret := esp_board_manager_get_device_config(ESP_BOARD_DEVICE_NAME_DISPLAY_LCD, @cfgp);
+    if (ret <> ESP_OK) or (cfgp = nil) then
+    begin
+      writeln(TAG, ': E display_lcd config: ', ret);
+      halt
+    end;
+    devcfg := cfgp^;
+    if AConfig.OverridePsramDmaDirect then
+      devcfg.sub_cfg.spi.io_spi_config.flags :=
+        devcfg.sub_cfg.spi.io_spi_config.flags or SPI_FLAG_psram_dma_direct;
+    if AConfig.PclkHz <> 0 then
+      devcfg.sub_cfg.spi.io_spi_config.pclk_hz := AConfig.PclkHz;
+    ret := esp_board_device_override_config(ESP_BOARD_DEVICE_NAME_DISPLAY_LCD,
+      @devcfg, cuint16(sizeof(dev_display_lcd_config_t)));
+    if ret <> ESP_OK then
+    begin
+      writeln(TAG, ': E display_lcd override_config: ', ret);
+      halt
+    end;
+  end;
 
   ret := esp_board_manager_init_device_by_name(ESP_BOARD_DEVICE_NAME_DISPLAY_LCD);
   if ret <> ESP_OK then
   begin
     writeln(TAG, ': E display_lcd init: ', ret);
-    halt
-  end;
-
-  ret := esp_board_manager_get_device_config(ESP_BOARD_DEVICE_NAME_DISPLAY_LCD, @cfgp);
-  if (ret <> ESP_OK) or (cfgp = nil) then
-  begin
-    writeln(TAG, ': E display_lcd config: ', ret);
-    halt
-  end;
-  devcfg := cfgp^;
-  devcfg.sub_cfg.spi.io_spi_config.flags :=
-    devcfg.sub_cfg.spi.io_spi_config.flags or SPI_FLAG_psram_dma_direct;
-  devcfg.sub_cfg.spi.io_spi_config.pclk_hz := 80000000;
-  ret := esp_board_manager_deinit_device_by_name(ESP_BOARD_DEVICE_NAME_DISPLAY_LCD);
-  if ret <> ESP_OK then
-  begin
-    writeln(TAG, ': E display_lcd deinit: ', ret);
-    halt
-  end;
-  ret := esp_board_device_override_config(ESP_BOARD_DEVICE_NAME_DISPLAY_LCD,
-    @devcfg, cuint16(sizeof(dev_display_lcd_config_t)));
-  if ret <> ESP_OK then
-  begin
-    writeln(TAG, ': E display_lcd override_config: ', ret);
-    halt
-  end;
-  ret := esp_board_manager_init_device_by_name(ESP_BOARD_DEVICE_NAME_DISPLAY_LCD);
-  if ret <> ESP_OK then
-  begin
-    writeln(TAG, ': E display_lcd re-init: ', ret);
     halt
   end;
 
@@ -144,13 +129,11 @@ begin
     halt
   end;
 
-  { see the unit header: brightness is a vendor register on this board;
-    carried commented, exactly as landscape runs it }
-  {if esp_lcd_panel_co5300_set_brightness(FPanel, BRIGHTNESS) <> ESP_OK then
-    writeln(TAG, ': W set_brightness failed (running at driver default)');}
-
   FStarted := True;
-  writeln(TAG, ': I panel ready (psram_dma_direct, 80 MHz)');
+  if need_override then
+    writeln(TAG, ': I panel ready (overrides applied)')
+  else
+    writeln(TAG, ': I panel ready (BMGR defaults)');
   Result := ESP_OK;
 end;
 

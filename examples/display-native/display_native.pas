@@ -8,8 +8,8 @@ program display_native;
   CDC console chain. The program body IS app_main (PASCALMAIN), as in the
   display_lvgl example; the facade's unit initialization has already
   lazily initialized the optional chain devices (touch, brightness) by
-  the time the body runs, and TBoardLvgl.Start brings the panel up
-  through the boarddisplay chain on the way.
+  the time the body runs, and TBoardLvgl.StartEx(MosaicoLvglConfig)
+  brings the panel up through boarddisplay with Mosaico panel policy.
 
   The red button doubles as the packed-lv_color_t ABI probe: lv_color_t
   is a 3x uint8 C struct passed by value (psABI-bitified into one
@@ -30,15 +30,13 @@ program display_native;
         --lib lvgl__lvgl --lib espressif__esp_lvgl_adapter \
         ... (the full --lib set is in this directory's README.md) ...
 
-  Configurable variant (values are the facade defaults shown):
+  Mosaico start (board pack supplies Panel overrides):
 
     var
       cfg: TBoardLvglConfig;
     begin
       cfg := TBoardLvgl.DefaultConfig;
-      cfg.TaskPriority  := 5;
-      cfg.Rotation      := ESP_LV_ADAPTER_ROTATE_180;
-      cfg.TouchScaleY   := 1.0;
+      cfg.Panel := MosaicoDisplayConfig;
       ret := TBoardLvgl.StartEx(cfg);
     end.
 
@@ -52,7 +50,8 @@ uses
   idfheap,        { MUST be first: installs the IDF heap manager }
   c_bmgr,         { L1: esp_err_t }
   c_lvgl,         { L1: LVGL 9.6 working subset }
-  boardlvgl;   { L2: facade - use = display chain initialized }
+  boardlvgl,      { L2: facade - BMGR device names + LVGL adapter }
+  board_mosaico;  { Mosaico panel policy for StartEx }
 
 { FreeRTOS; pdMS_TO_TICKS(1000) = 100 ticks at this sdkconfig's
   CONFIG_FREERTOS_HZ=100 }
@@ -75,11 +74,14 @@ end;
 var
   screen, hint, btn, btn_label: plv_obj_t;
   ret: esp_err_t;
+  cfg: TBoardLvglConfig;
 begin
-  ret := TBoardLvgl.Start;
+  cfg := TBoardLvgl.DefaultConfig;
+  cfg.Panel := MosaicoDisplayConfig;
+  ret := TBoardLvgl.StartEx(cfg);
   if ret <> ESP_OK then
   begin
-    writeln(TAG, ': E TBoardLvgl.Start: ', ret);
+    writeln(TAG, ': E TBoardLvgl.StartEx: ', ret);
     { spin: do not halt - the RTL shutdown would tear the console down }
     while True do
       vTaskDelay(HEARTBEAT_TICKS);

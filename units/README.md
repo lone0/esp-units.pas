@@ -164,7 +164,7 @@ uses the `c` prefix for C-library bindings: `cthreads`, `cmem`, `cwstring`):
 | Layer | Name grammar | Nature | Units |
 |---|---|---|---|
 | L1 binding | `c_<C component short name>` | hand-converted C-header shadow: `cdecl; external` functions keep their C names; records are C-ABI-true (`{$packrecords C}`, `{$minenumsize 4}`, sizes verified against the C build) | `c_bmgr`, `c_esp_lcd`, `c_lvgl_adapter`, `c_lvgl`, `c_bmi270` |
-| L2 native | functional name, no `c_` prefix | Pascal-idiomatic service built on L1: advanced records with static methods, value-semantics config, `esp_err_t` visible, no exceptions | `boarddisplay` (panel chain), `boardlvgl` (LVGL facade), `imuattitude` (the functional `idfheap` and the `espatomics` sub-project predate the grammar and are L2 by nature) |
+| L2 native | functional name, no `c_` prefix | Pascal-idiomatic service built on L1: advanced records with static methods, value-semantics config, `esp_err_t` visible, no exceptions | `boarddisplay` (panel chain), `boardlvgl` (LVGL facade), `board_mosaico` (thin board pack), `imuattitude` (the functional `idfheap` and the `espatomics` sub-project predate the grammar and are L2 by nature) |
 
 Rules the grammar enforces:
 
@@ -213,28 +213,36 @@ records the v9 facts it bakes in: int32_t coordinates, the real symbol
 
 ## `boarddisplay` — panel chain (L2)
 
-The LVGL-free half of the display chain: `TBoardDisplay.Start` brings the
-BMGR `display_lcd` device up with this board's two overrides
-(`psram_dma_direct` + 80 MHz pclk) patched onto the generated config via
-BMGR's official re-init path (deinit → override_config → init — an esp_lcd
-panel object binds its io at creation, so patching means rebuilding), then
-hands out the BMGR-owned handle via `TBoardDisplay.Panel`. Halts on failure
-(landscape esp_init semantics); brightness is a CO5300 vendor register,
-carried commented exactly as landscape runs it. Consumers:
-`../examples/landscape/` (direct esp_lcd driver) and `boardlvgl`.
+The LVGL-free half of the display chain. Board-agnostic: no panel-chip
+`{$linklib}`. `TBoardDisplay.DefaultConfig` leaves the BMGR-generated
+`display_lcd` config untouched; `StartEx(TBoardDisplayConfig)` optionally
+patches `psram_dma_direct` / `pclk_hz`, then `override_config` + init once
+(panel IO binds at creation — override before first init). Hands out the
+BMGR-owned handle via `TBoardDisplay.Panel`. Halts on failure. Chip drivers
+come from the app `--lib` / SDK yaml. Consumers: `boardlvgl`,
+`../examples/board-facade-generic/`, `../examples/landscape/` (via
+`board_mosaico`).
 
 ## `boardlvgl` — LVGL display-chain facade (L2)
 
-`uses boardlvgl` lazily initializes the optional chain devices (lcd_touch,
-lcd_brightness; warn-and-continue) in the unit initialization;
-`TBoardLvgl.Start` (or `StartEx(TBoardLvglConfig)`) brings the panel up
-through the `boarddisplay` chain, then brings the esp_lvgl_adapter up with
+Board-agnostic: no touch-chip `{$linklib}`. `TBoardLvgl.Start` /
+`StartEx(TBoardLvglConfig)` brings the panel up through
+`boarddisplay.StartEx(AConfig.Panel)`, then the esp_lvgl_adapter with
 display + touch registered and the worker running — then
 `lv_screen_active()` is live and Pascal UI code runs under
-`TBoardLvgl.UILock/UIUnlock`. `Stop` is the terminal teardown (main.c's
-cleanup path as a function). Full-board init stays L1
-(`esp_board_manager_init`); callback hooks and TE/mono display profiles stay
-L1 (`c_lvgl_adapter`). Consumer: `../examples/display-native/`.
+`TBoardLvgl.UILock/UIUnlock`. `Stop` is the terminal teardown. Full-board
+init stays L1 (`esp_board_manager_init`); callback hooks and TE/mono
+profiles stay L1 (`c_lvgl_adapter`). Consumer: `../examples/display-native/`
+(with `board_mosaico`).
+
+## `board_mosaico` — ESP-Mosaico board pack
+
+Thin pack over `boarddisplay` only (no LVGL dependency):
+`MosaicoDisplayConfig` (`psram_dma_direct` + 80 MHz) and
+`MosaicoSetBrightness` (CO5300 vendor register). LVGL apps set
+`cfg.Panel := MosaicoDisplayConfig` on a `TBoardLvglConfig`. Chip `--lib`
+docs live here. Examples: `../examples/board-facade-mosaico/`, landscape,
+display-native.
 
 ## `imuattitude` — tilt angles (L2)
 
@@ -253,7 +261,7 @@ Where to look for what:
 
 | Directory | Content |
 |---|---|
-| `units/` | `idfheap` + self-contained `espatomics/` sub-project + L1 bindings (`c_bmgr`, `c_esp_lcd`, `c_lvgl_adapter`, `c_lvgl`, `c_bmi270`) + L2 (`boarddisplay` panel chain, `boardlvgl` LVGL facade, `imuattitude`) |
+| `units/` | `idfheap` + self-contained `espatomics/` sub-project + L1 bindings (`c_bmgr`, `c_esp_lcd`, `c_lvgl_adapter`, `c_lvgl`, `c_bmi270`) + L2 (`boarddisplay` panel chain, `boardlvgl` LVGL facade, `board_mosaico` pack, `imuattitude`) |
 | `units/espatomics/` | ESP.Atomics docs + sources (see its `AGENTS.md`) |
 | `tests/` | compiler verification + demonstration programs (`tests/README.md` per test) |
 | `scripts/` | build / QEMU / flash automation, SoC-parameterized |
