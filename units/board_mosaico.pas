@@ -1,27 +1,21 @@
-{ board_mosaico - thin ESP-Mosaico board pack over the generic L2 facades.
+{ board_mosaico - thin ESP-Mosaico helpers for things BMGR does not model.
 
-  boarddisplay / boardlvgl stay board-agnostic (device names + lifecycle).
-  This unit owns Mosaico panel policy and the CO5300 brightness helper.
-  Touch IC (CST9220) still belongs on the app's --lib line / SDK yaml.
+  Hardware policy that yaml can express (chip, pins, geometry, SPI pclk /
+  psram_dma_direct) lives in esp_mosaico board_devices.yaml + gen_bmgr_codes.
+  L2 facades (boarddisplay / boardlvgl) stay yaml-as-is via DefaultConfig.
 
-  Deliberately does NOT use boardlvgl: panel-only apps (landscape, the
-  facade demos) must not pull the LVGL adapter archives. LVGL apps set
-  cfg.Panel := MosaicoDisplayConfig on a TBoardLvglConfig themselves.
+  This unit keeps only vendor helpers outside BMGR devices - today the
+  CO5300 brightness register. Do not put SPI policy here.
 
   Contract:
 
-    uses board_mosaico;
-    ret := TBoardDisplay.StartEx(MosaicoDisplayConfig);
+    uses boarddisplay, board_mosaico;
+    ret := TBoardDisplay.Start;   { yaml / gen_bmgr defaults }
+    panel := TBoardDisplay.Panel;
+    ignore := MosaicoSetBrightness(panel, 60);
 
-    { LVGL apps: }
-    cfg := TBoardLvgl.DefaultConfig;
-    cfg.Panel := MosaicoDisplayConfig;
-    ret := TBoardLvgl.StartEx(cfg);
-
-  App link closure (same family as mosaico_sim / display_lvgl):
-    --lib espressif__esp_lcd_co5300
-    --lib espressif__esp_lcd_touch_cst9220
-    (+ BMGR / gen_bmgr_codes / transport libs as usual) }
+  App still needs --lib espressif__esp_lcd_co5300 when calling brightness
+  (and for BMGR's panel factory). }
 
 unit board_mosaico;
 
@@ -31,12 +25,7 @@ unit board_mosaico;
 interface
 
 uses
-  c_bmgr,
-  boarddisplay;
-
-{ Mosaico panel policy: PSRAM DMA direct + 80 MHz pclk (hardware-
-  verified landscape / display_native values). }
-function MosaicoDisplayConfig: TBoardDisplayConfig;
+  c_bmgr;
 
 { CO5300 vendor-register brightness (percent). BMGR has no brightness
   device on this board; every panel re-init resets the register to the
@@ -48,13 +37,6 @@ implementation
 
 function esp_lcd_panel_co5300_set_brightness(panel: esp_lcd_panel_handle_t;
   brightness_percent: cuint8): esp_err_t; cdecl; external;
-
-function MosaicoDisplayConfig: TBoardDisplayConfig;
-begin
-  Result := TBoardDisplay.DefaultConfig;
-  Result.OverridePsramDmaDirect := True;
-  Result.PclkHz := 80000000;
-end;
 
 function MosaicoSetBrightness(panel: esp_lcd_panel_handle_t;
   brightness_percent: cuint8): esp_err_t;

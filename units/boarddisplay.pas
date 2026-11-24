@@ -4,9 +4,9 @@
 
   Board-agnostic: no panel-chip {$linklib}. The SDK project's yaml /
   gen_bmgr_codes + the app's --lib line resolve CO5300 / whatever IC.
-  Panel policy (psram_dma_direct, pclk) is a value-semantics config;
-  DefaultConfig = "use BMGR-generated defaults". Board packs (see
-  board_mosaico) or apps supply overrides via StartEx.
+  Prefer putting SPI policy (pclk, psram_dma_direct) in board yaml.
+  DefaultConfig / Start = yaml-as-is. StartEx remains for rare runtime
+  patches; do not use it for normal Mosaico SPI policy.
 
   Contract:
 

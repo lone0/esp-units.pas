@@ -69,7 +69,7 @@ workspace was removed *after* every one of its functions moved here.
 | `units/c_bmi270.pas` | L1 binding: espressif bmi270_sensor (precompiled component archive, path in its header) |
 | `units/boarddisplay.pas` | L2 panel chain (LVGL-free, board-agnostic): `DefaultConfig` = BMGR-as-generated; `StartEx(TBoardDisplayConfig)` optional `psram_dma_direct`/pclk; one-shot override→init; no chip `{$linklib}`; `Panel`; halts on failure |
 | `units/boardlvgl.pas` | L2 LVGL facade (board-agnostic): `StartEx` → `boarddisplay.StartEx(Panel)` + adapter; no touch-chip `{$linklib}`; callbacks/TE/mono stay L1 |
-| `units/board_mosaico.pas` | Thin ESP-Mosaico pack (no LVGL dep): `MosaicoDisplayConfig` + `MosaicoSetBrightness` (CO5300); LVGL apps set `cfg.Panel` |
+| `units/board_mosaico.pas` | Mosaico vendor helpers only (`MosaicoSetBrightness`); SPI policy is in BMGR yaml, not here |
 | `units/imuattitude.pas` | L2 tilt angles (ex bmi270tilt, renamed 2026-11-11): `TImuAttitude.InitBmi270(periph, addr)/Read`; boot-pose baseline; roll+pitch only (yaw = not provided); consumers keep board facts (addr) app-side |
 | `units/README.md` | API docs + the **L1/L2 naming grammar** (`c_<C component>` = binding shadow, functional name = Pascal-native) + examples for published units; points at `units/espatomics/` for atomics |
 | `tests/` | the suite: 32 renamed webtbs regressions (incl. compile-only `u_generics_pubsub_events.pas`) + `t_generics_collections_tstack` (moved demo); `run-tests.sh`, `README.md` per-test docs. Self-authored cases are NOT committed (policy 2026-10-24; the self-authored `t_encoding_roundtrip` and `tests/thread-stubs/` were removed 2026-11-12 — upstream thread cases live in FPCSource `tests/test/`). |

@@ -235,14 +235,12 @@ init stays L1 (`esp_board_manager_init`); callback hooks and TE/mono
 profiles stay L1 (`c_lvgl_adapter`). Consumer: `../examples/display-native/`
 (with `board_mosaico`).
 
-## `board_mosaico` — ESP-Mosaico board pack
+## `board_mosaico` — ESP-Mosaico vendor helpers only
 
-Thin pack over `boarddisplay` only (no LVGL dependency):
-`MosaicoDisplayConfig` (`psram_dma_direct` + 80 MHz) and
-`MosaicoSetBrightness` (CO5300 vendor register). LVGL apps set
-`cfg.Panel := MosaicoDisplayConfig` on a `TBoardLvglConfig`. Chip `--lib`
-docs live here. Examples: `../examples/board-facade-mosaico/`, landscape,
-display-native.
+SPI policy (`pclk_hz`, `psram_dma_direct`) lives in
+`esp_mosaico/board_devices.yaml` → `gen_bmgr_codes`. This unit only exposes
+`MosaicoSetBrightness` (CO5300 register BMGR does not model). L2 facades
+use `DefaultConfig` / yaml-as-is. See `../sdk/PROFILES.md`.
 
 ## `imuattitude` — tilt angles (L2)
 

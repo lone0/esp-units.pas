@@ -1,35 +1,11 @@
-{ board_facade_mosaico — show the thin board-pack path.
+{ board_facade_mosaico — yaml-as-is panel + optional CO5300 brightness.
 
-  Same RGB-bars smoke as board_facade_generic, but panel policy comes
-  from board_mosaico (psram_dma_direct + 80 MHz) instead of living inside
-  boarddisplay. The generic L2 units stay chip-agnostic; the pack owns
-  Mosaico defaults (+ optional CO5300 brightness).
+  SPI policy (80 MHz, psram_dma_direct) lives in esp_mosaico
+  board_devices.yaml / gen_bmgr_codes. This demo only shows the leftover
+  vendor helper in board_mosaico (brightness). Pair with
+  board-facade-generic (same Start path, no brightness call).
 
-  Contrast: examples/board-facade-generic/ uses TBoardDisplay.Start with
-  BMGR-as-generated defaults (no overrides).
-
-  Build (from this directory; same link closure as mosaico_sim):
-
-    ESP_FPC_ROOT=$HOME/fpc-cross-s31 \
-    ESP_IDF_PATH=$HOME/esp/esp-idf-v6.1 ESP_IDF_VERSION=6.1 \
-    ESP32_SDK_PROJECT=$HOME/mosaico-s31 \
-    ../../scripts/build.sh board_facade_mosaico.pas --soc esp32s31 \
-      --lib espressif__esp_board_manager --lib gen_bmgr_codes \
-      --lib esp_lcd --lib espressif__esp_lcd_co5300 \
-      --lib espressif__esp_lcd_touch_cst9220 --lib espressif__esp_lcd_touch \
-      --lib espressif__esp_codec_dev --lib espressif__i2c_bus \
-      --lib espressif__button --lib espressif__bq27220 \
-      --lib espressif__esp_video --lib espressif__esp_cam_sensor \
-      --lib espressif__esp_sccb_intf --lib esp_driver_cam --lib esp_driver_ppa \
-      --lib esp_hal_cam \
-      --lib $HOME/mosaico-s31/managed_components/espressif__bmi270_sensor/6.1/esp32s31/libbmi270_sensor.a \
-      --lib esp_driver_gpio --lib esp_driver_spi \
-      --lib esp_driver_i2c --lib esp_driver_i2s --lib esp_driver_ledc \
-      --lib esp_hal_ledc --lib esp_hal_gpio --lib esp_hal_lcd \
-      --lib esp_hal_i2c --lib esp_hal_i2s --lib esp_timer --lib esp_partition \
-      --lib log --lib vfs --lib esp_system
-
-  Re-pack + run under esp32sim: see README.md (64KB MMU, VCC ramp bypass). }
+  Build / run: see README.md (lvgl-mosaico-s31, 64KB MMU, merge-bin @ 0xA000). }
 
 program board_facade_mosaico;
 
@@ -90,15 +66,13 @@ var
   fb: PWord;
   i: integer;
 begin
-  { Override before first init — boarddisplay one-shot path. }
-  ret := TBoardDisplay.StartEx(MosaicoDisplayConfig);
+  ret := TBoardDisplay.Start;
   if ret <> ESP_OK then
     halt;
   panel := TBoardDisplay.Panel;
   if panel = nil then
     halt;
 
-  { Optional: pack-owned brightness; ignore failure (driver default max). }
   if MosaicoSetBrightness(panel, BRIGHTNESS) <> ESP_OK then
     writeln(TAG, ': W set_brightness failed (driver default)');
 
@@ -112,8 +86,8 @@ begin
     halt;
   ret := esp_lcd_panel_draw_bitmap(panel, 0, 0, W, H, fb);
 
-  esp_rom_printf('demo: ui up (mosaico pack)'#10);
-  writeln(TAG, ': I panel ready via MosaicoDisplayConfig');
+  esp_rom_printf('demo: ui up (yaml + brightness)'#10);
+  writeln(TAG, ': I panel ready via TBoardDisplay.Start + MosaicoSetBrightness');
 
   for i := 1 to 20 do
     vTaskDelay(10);
