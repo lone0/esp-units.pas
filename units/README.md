@@ -214,14 +214,14 @@ records the v9 facts it bakes in: int32_t coordinates, the real symbol
 ## `boarddisplay` — panel chain (L2)
 
 The LVGL-free half of the display chain. Board-agnostic: no panel-chip
-`{$linklib}`. `TBoardDisplay.DefaultConfig` leaves the BMGR-generated
-`display_lcd` config untouched; `StartEx(TBoardDisplayConfig)` optionally
-patches `psram_dma_direct` / `pclk_hz`, then `override_config` + init once
-(panel IO binds at creation — override before first init). Hands out the
-BMGR-owned handle via `TBoardDisplay.Panel`. Halts on failure. Chip drivers
-come from the app `--lib` / SDK yaml. Consumers: `boardlvgl`,
-`../examples/board-facade-generic/`, `../examples/landscape/` (via
-`board_mosaico`).
+`{$linklib}`. **Prefer yaml-as-is:** put SPI policy (`pclk_hz`,
+`psram_dma_direct`, …) in the IDF project’s BMGR `board_devices.yaml`,
+regenerate `gen_bmgr_codes`, then call `TBoardDisplay.Start` /
+`DefaultConfig`. `StartEx` remains only for rare runtime patches — not for
+normal board policy (see repo `AGENTS.md` §3.9 and `../sdk/PROFILES.md`).
+Hands out the BMGR-owned handle via `TBoardDisplay.Panel`. Halts on
+failure. Chip drivers come from the app `--lib` / SDK yaml. Consumers:
+`boardlvgl`, `../examples/board-suite/`, `../examples/landscape/`.
 
 ## `boardlvgl` — LVGL display-chain facade (L2)
 

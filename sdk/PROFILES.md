@@ -1,6 +1,10 @@
 # IDF SDK profiles for one Pascal suite
 
-Zhen’s rule: **hardware in YAML; Pascal stays hardware-independent.**
+**Agent rule (also `AGENTS.md` §3.9):** hardware configuration belongs in
+the IDF build’s BMGR board YAML (`board_devices.yaml` / peripherals /
+amend) → `gen_bmgr_codes`, **not** embedded in Pascal L2 units. Pascal
+stays hardware-agnostic above FreeRTOS / ESP-IDF; apps may supply only
+what BMGR cannot model.
 
 Three ESP-IDF project trees (already on this machine) back the same
 `units/` sources. Switch only `ESP32_SDK_PROJECT` (and the mosaico lib

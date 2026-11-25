@@ -67,9 +67,10 @@ workspace was removed *after* every one of its functions moved here.
 | `units/c_lvgl.pas` | L1 binding: LVGL 9.6 working subset (grows per business; bakes the v9 facts incl. the packed-`lv_color_t` by-value strategy — psABI-bitified cuint, **hardware-verified pure-red 2026-11-07**) |
 | `units/c_esp_lcd.pas` | L1 binding: esp_lcd panel ops (`esp_lcd_panel_draw_bitmap` etc.; opaque handles live in `c_bmgr`) |
 | `units/c_bmi270.pas` | L1 binding: espressif bmi270_sensor (precompiled component archive, path in its header) |
-| `units/boarddisplay.pas` | L2 panel chain (LVGL-free, board-agnostic): `DefaultConfig` = BMGR-as-generated; `StartEx(TBoardDisplayConfig)` optional `psram_dma_direct`/pclk; one-shot override→init; no chip `{$linklib}`; `Panel`; halts on failure |
-| `units/boardlvgl.pas` | L2 LVGL facade (board-agnostic): `StartEx` → `boarddisplay.StartEx(Panel)` + adapter; no touch-chip `{$linklib}`; callbacks/TE/mono stay L1 |
-| `units/board_mosaico.pas` | Mosaico vendor helpers only (`MosaicoSetBrightness`); SPI policy is in BMGR yaml, not here |
+| `units/boarddisplay.pas` | L2 panel chain (LVGL-free, board-agnostic): prefer `Start` / `DefaultConfig` = BMGR yaml via `gen_bmgr_codes`; `StartEx` only for rare runtime patches — **not** for normal board SPI policy (put that in IDF yaml); no chip `{$linklib}`; `Panel`; halts on failure |
+| `units/boardlvgl.pas` | L2 LVGL facade (board-agnostic): `Start` / `StartEx` → `boarddisplay` + adapter; Panel defaults yaml-as-is; no touch-chip `{$linklib}`; callbacks/TE/mono stay L1 |
+| `units/board_mosaico.pas` | App-opt-in Mosaico vendor helper only (`MosaicoSetBrightness`); SPI policy is in BMGR yaml, not here |
+| `sdk/PROFILES.md` | IDF SDK profiles (sim mosaico / real mosaico / generic S31) + yaml regen recipe for agents |
 | `units/imuattitude.pas` | L2 tilt angles (ex bmi270tilt, renamed 2026-11-11): `TImuAttitude.InitBmi270(periph, addr)/Read`; boot-pose baseline; roll+pitch only (yaw = not provided); consumers keep board facts (addr) app-side |
 | `units/README.md` | API docs + the **L1/L2 naming grammar** (`c_<C component>` = binding shadow, functional name = Pascal-native) + examples for published units; points at `units/espatomics/` for atomics |
 | `tests/` | the suite: 32 renamed webtbs regressions (incl. compile-only `u_generics_pubsub_events.pas`) + `t_generics_collections_tstack` (moved demo); `run-tests.sh`, `README.md` per-test docs. Self-authored cases are NOT committed (policy 2026-10-24; the self-authored `t_encoding_roundtrip` and `tests/thread-stubs/` were removed 2026-11-12 — upstream thread cases live in FPCSource `tests/test/`). |
@@ -126,6 +127,20 @@ workspace was removed *after* every one of its functions moved here.
    handle"; the mosaico business blocks need ~10 lines of extra struct
    bindings total, all on the IDF-component side — iot_button, bq27220 —
    not on bmgr). Build L2 only where a consumer repeats friction.
+9. **Hardware configuration belongs in the IDF build’s BMGR board YAML
+   (then `gen_bmgr_codes`), not embedded in Pascal units.** This repo is
+   hardware-agnostic above FreeRTOS / ESP-IDF: chip, pins, geometry, SPI
+   policy (`pclk_hz`, `psram_dma_direct`), bus mux, and similar board facts
+   go in `board_devices.yaml` / `board_peripherals.yaml` (or a board
+   amend) of the `ESP32_SDK_PROJECT`, then regenerate and rebuild that
+   SDK. L2 facades (`boarddisplay` / `boardlvgl`) use yaml-as-is
+   (`DefaultConfig` / `Start`). Do **not** hard-code board SPI clocks,
+   DMA flags, chip `{$linklib}`s, or pin mux in shared L2. If BMGR cannot
+   model something (e.g. a vendor brightness register), the **application**
+   (or a thin app-owned helper the app opts into) may provide it — that is
+   exceptional relative to putting yaml-expressible policy in Pascal; ask
+   before enlarging shared units with hardware-specific code. Profiles and
+   regen recipe: `sdk/PROFILES.md`.
 
 ## 4. Environment interfaces
 
