@@ -10,8 +10,9 @@
 
   Board-agnostic: no touch-chip {$linklib}. The SDK project's yaml /
   gen_bmgr_codes + the app's --lib line resolve CST9220 / whatever IC.
-  Panel policy rides on TBoardLvglConfig.Panel (see boarddisplay /
-  board_mosaico).
+  Panel SPI policy lives in BMGR yaml; boarddisplay.Start is yaml-as-is.
+  Apps that patch display_lcd call TBoardDisplay.OverrideConfig themselves
+  before TBoardLvgl.Start (facade does not invent SPI fields).
 
   Contract:
 
@@ -25,17 +26,16 @@
     lv_label_create(lv_screen_active());    (Pascal UI over c_lvgl)
     TBoardLvgl.UIUnlock;
 
-  - StartEx first brings display_lcd up through boarddisplay.StartEx
-    (AConfig.Panel), then lazily initializes lcd_touch/lcd_brightness
-    (warn-and-continue, exactly like the lvgl-s31 example). Full-
-    board initialization (audio, buttons, battery, ...) stays L1: call
+  - StartEx first brings display_lcd up through boarddisplay.Start,
+    then lazily initializes lcd_touch/lcd_brightness (warn-and-continue,
+    exactly like the lvgl-s31 example). Full-board initialization
+    (audio, buttons, battery, ...) stays L1: call
     esp_board_manager_init() from c_bmgr yourself.
   - configuration is a value-semantics record (TBoardLvglConfig,
-    DefaultConfig = adapter defaults + BMGR-as-generated panel). Board
-    packs (board_mosaico) or apps supply Panel overrides via StartEx.
-    Callback hooks (auto-sleep, touch custom read) and the TE/mono
-    display profiles are NOT in the L2 config - those need the L1
-    c_lvgl_adapter full API.
+    DefaultConfig = adapter defaults). Panel hardware stays in yaml /
+    optional app OverrideConfig. Callback hooks (auto-sleep, touch
+    custom read) and the TE/mono display profiles are NOT in the L2
+    config - those need the L1 c_lvgl_adapter full API.
   - after a successful Start, lv_screen_active() is live but the LVGL
     worker task owns rendering: wrap EVERY app-side LVGL call in
     UILock/UIUnlock (the lvgl_test_ui.c ui_acquire/ui_release pattern),
@@ -56,16 +56,15 @@ interface
 uses
   c_bmgr,          { esp_err_t, device-name constants, ppvoid }
   c_lvgl_adapter,  { adapter config types, macro equivalents, API, handles }
-  boarddisplay;    { L2 panel chain: display_lcd bring-up + optional overrides }
+  boarddisplay;    { L2 panel chain: display_lcd bring-up }
 
 type
   { Value-semantics configuration. Field defaults = the adapter defaults
-    verified by display_lvgl, with Panel = BMGR-as-generated (no SPI
-    overrides). hor_res/ver_res and the panel/io handles are deliberately
-    absent - the facade reads them from the bmgr device config at Start. }
+    verified by display_lvgl. Panel SPI policy is BMGR yaml (or an app
+    TBoardDisplay.OverrideConfig before Start) — not fields here.
+    hor_res/ver_res and the panel/io handles are deliberately absent -
+    the facade reads them from the bmgr device config at Start. }
   TBoardLvglConfig = record
-    { --- panel policy (forwarded to TBoardDisplay.StartEx) --- }
-    Panel: TBoardDisplayConfig;
     { --- adapter worker: 1:1 with esp_lv_adapter_config_t values --- }
     TaskStackSize: cuint;        { default 6*1024, example-verified }
     TaskPriority: cuint;         { default 4 }
@@ -104,8 +103,8 @@ type
     { zero-arg default path: "one call lights the screen" }
     class function Start: esp_err_t; static; overload;
 
-    { fully configurable path. Brings the panel up through the
-      boarddisplay chain (TBoardDisplay.StartEx(AConfig.Panel)), brings
+    { fully configurable path. Brings the panel up through
+      TBoardDisplay.Start (yaml-as-is / prior OverrideConfig), brings
       the adapter up, registers the display (SPI+PSRAM branch, runtime
       sub_type fallbacks mirror main.c's CONFIG-gated #else branches)
       and - if lcd_touch initialized - touch, then starts the worker.
@@ -139,7 +138,7 @@ function strcmp(a, b: PChar): cint; cdecl; external;
 var
   { optional-device init snapshots, taken once by StartEx after
     display_lcd is live; display_lcd is not here -
-    TBoardDisplay.StartEx owns it }
+    TBoardDisplay.Start owns it }
   TouchInited: esp_err_t;
   BrightnessInited: esp_err_t;
   OptionalDevicesInited: Boolean = False;
@@ -169,7 +168,6 @@ end;
 class function TBoardLvgl.DefaultConfig: TBoardLvglConfig;
 begin
   Result := Default(TBoardLvglConfig);
-  Result.Panel            := TBoardDisplay.DefaultConfig;
   Result.TaskStackSize     := 6 * 1024;
   Result.TaskPriority      := 4;
   Result.TaskCoreID        := 1;
@@ -212,10 +210,9 @@ var
 begin
   if FStarted then
     exit(ESP_ERR_INVALID_STATE);
-  { the panel chain lives in boarddisplay; Panel carries optional
-    overrides (or BMGR defaults). It writeln's and halts inside on
-    failure - a panel that did not come up leaves nothing to return to }
-  ret := TBoardDisplay.StartEx(AConfig.Panel);
+  { Panel chain is boarddisplay (yaml-as-is, or app OverrideConfig
+    before this call). It writeln's and halts inside on failure. }
+  ret := TBoardDisplay.Start;
   if ret <> ESP_OK then
     exit(ret);
   InitOptionalDevices;

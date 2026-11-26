@@ -67,8 +67,8 @@ workspace was removed *after* every one of its functions moved here.
 | `units/c_lvgl.pas` | L1 binding: LVGL 9.6 working subset (grows per business; bakes the v9 facts incl. the packed-`lv_color_t` by-value strategy — psABI-bitified cuint, **hardware-verified pure-red 2026-11-07**) |
 | `units/c_esp_lcd.pas` | L1 binding: esp_lcd panel ops (`esp_lcd_panel_draw_bitmap` etc.; opaque handles live in `c_bmgr`) |
 | `units/c_bmi270.pas` | L1 binding: espressif bmi270_sensor (precompiled component archive, path in its header) |
-| `units/boarddisplay.pas` | L2 panel chain (LVGL-free, board-agnostic): prefer `Start` / `DefaultConfig` = BMGR yaml via `gen_bmgr_codes`; `StartEx` only for rare runtime patches — **not** for normal board SPI policy (put that in IDF yaml); no chip `{$linklib}`; `Panel`; halts on failure |
-| `units/boardlvgl.pas` | L2 LVGL facade (board-agnostic): `Start` / `StartEx` → `boarddisplay` + adapter; Panel defaults yaml-as-is; no touch-chip `{$linklib}`; callbacks/TE/mono stay L1 |
+| `units/boarddisplay.pas` | L2 panel chain (LVGL-free, board-agnostic): `Start` = BMGR yaml via `gen_bmgr_codes`; optional `OverrideConfig` is a passthrough — **app** mutates the config, facade does not invent SPI fields; no chip `{$linklib}`; `Panel`; halts on failure |
+| `units/boardlvgl.pas` | L2 LVGL facade (board-agnostic): `Start` / `StartEx` → `boarddisplay.Start` + adapter; `TBoardLvglConfig` = adapter policy only; no touch-chip `{$linklib}`; callbacks/TE/mono stay L1 |
 | `units/board_mosaico.pas` | App-opt-in Mosaico vendor helper only (`MosaicoSetBrightness`); SPI policy is in BMGR yaml, not here |
 | `sdk/PROFILES.md` | IDF SDK profiles (sim mosaico / real mosaico / generic S31) + yaml regen recipe for agents |
 | `units/imuattitude.pas` | L2 tilt angles (ex bmi270tilt, renamed 2026-11-11): `TImuAttitude.InitBmi270(periph, addr)/Read`; boot-pose baseline; roll+pitch only (yaw = not provided); consumers keep board facts (addr) app-side |
@@ -133,14 +133,15 @@ workspace was removed *after* every one of its functions moved here.
    policy (`pclk_hz`, `psram_dma_direct`), bus mux, and similar board facts
    go in `board_devices.yaml` / `board_peripherals.yaml` (or a board
    amend) of the `ESP32_SDK_PROJECT`, then regenerate and rebuild that
-   SDK. L2 facades (`boarddisplay` / `boardlvgl`) use yaml-as-is
-   (`DefaultConfig` / `Start`). Do **not** hard-code board SPI clocks,
-   DMA flags, chip `{$linklib}`s, or pin mux in shared L2. If BMGR cannot
-   model something (e.g. a vendor brightness register), the **application**
-   (or a thin app-owned helper the app opts into) may provide it — that is
-   exceptional relative to putting yaml-expressible policy in Pascal; ask
-   before enlarging shared units with hardware-specific code. Profiles and
-   regen recipe: `sdk/PROFILES.md`.
+   SDK. L2 facades use yaml-as-is (`TBoardDisplay.Start` /
+   `TBoardLvgl.Start`). Do **not** hard-code board SPI clocks, DMA flags,
+   chip `{$linklib}`s, or pin mux in shared L2. If a main really needs a
+   runtime BMGR patch, the **app** mutates the config and calls
+   `TBoardDisplay.OverrideConfig` before `Start` — L2 must not invent
+   those fields for the app. If BMGR cannot model something (e.g. a vendor
+   brightness register), the application (or a thin app-owned helper)
+   may provide it; ask before enlarging shared units with hardware-
+   specific code. Profiles and regen recipe: `sdk/PROFILES.md`.
 
 ## 4. Environment interfaces
 

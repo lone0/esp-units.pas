@@ -56,17 +56,24 @@ so the registry pulls the whole driver family regardless of which devices
 this program actually touches. The one difference vs display_lvgl: no `--c`
 (this program links no C sources) and the two snapshot .a paths stay as-is.
 
-Configurable start (the facade's value-semantics config record; defaults =
-the verified display_lvgl behavior):
+Configurable start (adapter policy only; panel SPI stays in BMGR yaml):
 
 ```pascal
 var
-  cfg: TBoardDisplayConfig;
+  cfg: TBoardLvglConfig;
 begin
-  cfg := TBoardDisplay.DefaultConfig;
+  cfg := TBoardLvgl.DefaultConfig;
   cfg.TaskPriority := 5;
   cfg.Rotation     := ESP_LV_ADAPTER_ROTATE_180;
-  ret := TBoardDisplay.StartEx(cfg);
+  ret := TBoardLvgl.StartEx(cfg);
+```
+
+App-owned panel patch (optional; before Start — facade does not invent fields):
+
+```pascal
+{ mutate a copy of display_lcd config, then: }
+TBoardDisplay.OverrideConfig(@cfg, SizeOf(cfg));
+TBoardLvgl.Start;
 ```
 
 Out of the L2 config by design (need them → drop to the L1

@@ -216,31 +216,34 @@ records the v9 facts it bakes in: int32_t coordinates, the real symbol
 The LVGL-free half of the display chain. Board-agnostic: no panel-chip
 `{$linklib}`. **Prefer yaml-as-is:** put SPI policy (`pclk_hz`,
 `psram_dma_direct`, …) in the IDF project’s BMGR `board_devices.yaml`,
-regenerate `gen_bmgr_codes`, then call `TBoardDisplay.Start` /
-`DefaultConfig`. `StartEx` remains only for rare runtime patches — not for
-normal board policy (see repo `AGENTS.md` §3.9 and `../sdk/PROFILES.md`).
+regenerate `gen_bmgr_codes`, then call `TBoardDisplay.Start`. The facade
+does **not** invent SPI patches. Apps that really want a runtime patch
+mutate a BMGR config copy themselves and call
+`TBoardDisplay.OverrideConfig` **before** `Start` (see unit header).
 Hands out the BMGR-owned handle via `TBoardDisplay.Panel`. Halts on
 failure. Chip drivers come from the app `--lib` / SDK yaml. Consumers:
 `boardlvgl`, `../examples/board-suite/`, `../examples/landscape/`.
+See repo `AGENTS.md` §3.9 and `../sdk/PROFILES.md`.
 
 ## `boardlvgl` — LVGL display-chain facade (L2)
 
 Board-agnostic: no touch-chip `{$linklib}`. `TBoardLvgl.Start` /
 `StartEx(TBoardLvglConfig)` brings the panel up through
-`boarddisplay.StartEx(AConfig.Panel)`, then the esp_lvgl_adapter with
-display + touch registered and the worker running — then
-`lv_screen_active()` is live and Pascal UI code runs under
-`TBoardLvgl.UILock/UIUnlock`. `Stop` is the terminal teardown. Full-board
-init stays L1 (`esp_board_manager_init`); callback hooks and TE/mono
-profiles stay L1 (`c_lvgl_adapter`). Consumer: `../examples/display-native/`
-(with `board_mosaico`).
+`boarddisplay.Start` (yaml-as-is / prior app `OverrideConfig`), then the
+esp_lvgl_adapter with display + touch registered and the worker running —
+then `lv_screen_active()` is live and Pascal UI code runs under
+`TBoardLvgl.UILock/UIUnlock`. `TBoardLvglConfig` holds adapter policy only
+(task priority, rotation, …), not panel SPI. `Stop` is the terminal
+teardown. Full-board init stays L1 (`esp_board_manager_init`); callback
+hooks and TE/mono profiles stay L1 (`c_lvgl_adapter`). Consumer:
+`../examples/display-native/`.
 
 ## `board_mosaico` — ESP-Mosaico vendor helpers only
 
 SPI policy (`pclk_hz`, `psram_dma_direct`) lives in
 `esp_mosaico/board_devices.yaml` → `gen_bmgr_codes`. This unit only exposes
 `MosaicoSetBrightness` (CO5300 register BMGR does not model). L2 facades
-use `DefaultConfig` / yaml-as-is. See `../sdk/PROFILES.md`.
+use yaml-as-is `Start`. See `../sdk/PROFILES.md`.
 
 ## `imuattitude` — tilt angles (L2)
 

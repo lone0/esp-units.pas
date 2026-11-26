@@ -34,7 +34,7 @@ program display_native;
 
     ret := TBoardLvgl.Start;
 
-  Or tune adapter-only fields (leave Panel at DefaultConfig):
+  Or tune adapter-only fields (panel SPI stays in yaml):
 
     var
       cfg: TBoardLvglConfig;
@@ -43,6 +43,11 @@ program display_native;
       cfg.TaskPriority := 5;
       ret := TBoardLvgl.StartEx(cfg);
     end.
+
+  App-owned BMGR panel patch (optional; before Start):
+
+    TBoardDisplay.OverrideConfig(@devcfg, SizeOf(devcfg));
+    TBoardLvgl.Start;
 
   idfheap comes first in uses - the IDF-backed heap manager must be
   installed before anything else allocates (the units' init or the string

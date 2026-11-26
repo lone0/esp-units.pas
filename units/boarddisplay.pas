@@ -4,20 +4,28 @@
 
   Board-agnostic: no panel-chip {$linklib}. The SDK project's yaml /
   gen_bmgr_codes + the app's --lib line resolve CO5300 / whatever IC.
-  Prefer putting SPI policy (pclk, psram_dma_direct) in board yaml.
-  DefaultConfig / Start = yaml-as-is. StartEx remains for rare runtime
-  patches; do not use it for normal Mosaico SPI policy.
+  Put SPI policy (pclk, psram_dma_direct) in board yaml. Start = yaml-as-is.
 
-  Contract:
+  The facade does not invent or apply board SPI patches. Apps that really
+  want a runtime patch of the BMGR-generated config do it themselves
+  (mutate a copy), then call OverrideConfig before Start:
 
-    uses boarddisplay;
-    if TBoardDisplay.Start <> ESP_OK then ...          { BMGR defaults }
-    if TBoardDisplay.StartEx(cfg) <> ESP_OK then ...  { with overrides }
-    panel := TBoardDisplay.Panel;
+    var
+      cfgp: Pdev_display_lcd_config_t;
+      cfg:  dev_display_lcd_config_t;
+    begin
+      if esp_board_manager_get_device_config(
+           ESP_BOARD_DEVICE_NAME_DISPLAY_LCD, @cfgp) <> ESP_OK then ...;
+      cfg := cfgp^;
+      { app mutates cfg — facade does not choose the fields }
+      if TBoardDisplay.OverrideConfig(@cfg,
+           cuint16(sizeof(cfg))) <> ESP_OK then ...;
+      if TBoardDisplay.Start <> ESP_OK then ...;
+      panel := TBoardDisplay.Panel;
+    end;
 
-  StartEx reads display_lcd config, optionally patches, override_config
-  then init once (panel IO binds at creation - override before first
-  init; avoids the init→deinit→re-init hang under esp32sim). }
+  OverrideConfig must run before the first Start (panel IO binds at
+  device creation; init→deinit→re-init can hang under esp32sim). }
 
 unit boarddisplay;
 
@@ -32,21 +40,18 @@ uses
   c_bmgr;
 
 type
-  { Value-semantics panel policy. Defaults leave the BMGR-generated
-    display_lcd config untouched. }
-  TBoardDisplayConfig = record
-    { OR SPI_FLAG_psram_dma_direct into io_spi_config.flags when True }
-    OverridePsramDmaDirect: Boolean;
-    { When non-zero, set io_spi_config.pclk_hz to this value (Hz).
-      0 = leave the generated clock alone. }
-    PclkHz: cuint32;
-  end;
-
   TBoardDisplay = record
   public
-    class function DefaultConfig: TBoardDisplayConfig; static;
-    class function Start: esp_err_t; static; overload;
-    class function StartEx(const AConfig: TBoardDisplayConfig): esp_err_t; static; overload;
+    { Optional app-owned patch of the BMGR-generated display_lcd config.
+      Pass a full device config the app prepared; this unit does not
+      interpret SPI fields. Call before Start. }
+    class function OverrideConfig(Config: Pointer;
+      ConfigSize: cuint16): esp_err_t; static;
+
+    { Init display_lcd from BMGR (yaml / gen_bmgr_codes, plus any prior
+      OverrideConfig). }
+    class function Start: esp_err_t; static;
+
     class function Panel: esp_lcd_panel_handle_t; static;
   end;
 
@@ -58,54 +63,37 @@ const
 var
   FPanel: esp_lcd_panel_handle_t = nil;
   FStarted: Boolean = False;
+  FOverridden: Boolean = False;
 
-class function TBoardDisplay.DefaultConfig: TBoardDisplayConfig;
-begin
-  Result := Default(TBoardDisplayConfig);
-  Result.OverridePsramDmaDirect := False;
-  Result.PclkHz := 0;
-end;
-
-class function TBoardDisplay.Start: esp_err_t;
-begin
-  Result := StartEx(DefaultConfig);
-end;
-
-class function TBoardDisplay.StartEx(const AConfig: TBoardDisplayConfig): esp_err_t;
+class function TBoardDisplay.OverrideConfig(Config: Pointer;
+  ConfigSize: cuint16): esp_err_t;
 var
   ret: esp_err_t;
-  cfgp: Pdev_display_lcd_config_t;
-  devcfg: dev_display_lcd_config_t;
-  lcdh: pointer;
-  lcd_handles: Pdev_display_lcd_handles_t;
-  need_override: Boolean;
 begin
   if FStarted then
     exit(ESP_ERR_INVALID_STATE);
+  if (Config = nil) or (ConfigSize = 0) then
+    exit(ESP_ERR_INVALID_ARG);
 
-  need_override := AConfig.OverridePsramDmaDirect or (AConfig.PclkHz <> 0);
-  if need_override then
+  ret := esp_board_device_override_config(
+    ESP_BOARD_DEVICE_NAME_DISPLAY_LCD, Config, ConfigSize);
+  if ret <> ESP_OK then
   begin
-    ret := esp_board_manager_get_device_config(ESP_BOARD_DEVICE_NAME_DISPLAY_LCD, @cfgp);
-    if (ret <> ESP_OK) or (cfgp = nil) then
-    begin
-      writeln(TAG, ': E display_lcd config: ', ret);
-      halt
-    end;
-    devcfg := cfgp^;
-    if AConfig.OverridePsramDmaDirect then
-      devcfg.sub_cfg.spi.io_spi_config.flags :=
-        devcfg.sub_cfg.spi.io_spi_config.flags or SPI_FLAG_psram_dma_direct;
-    if AConfig.PclkHz <> 0 then
-      devcfg.sub_cfg.spi.io_spi_config.pclk_hz := AConfig.PclkHz;
-    ret := esp_board_device_override_config(ESP_BOARD_DEVICE_NAME_DISPLAY_LCD,
-      @devcfg, cuint16(sizeof(dev_display_lcd_config_t)));
-    if ret <> ESP_OK then
-    begin
-      writeln(TAG, ': E display_lcd override_config: ', ret);
-      halt
-    end;
+    writeln(TAG, ': E display_lcd override_config: ', ret);
+    exit(ret);
   end;
+  FOverridden := True;
+  Result := ESP_OK;
+end;
+
+class function TBoardDisplay.Start: esp_err_t;
+var
+  ret: esp_err_t;
+  lcdh: pointer;
+  lcd_handles: Pdev_display_lcd_handles_t;
+begin
+  if FStarted then
+    exit(ESP_ERR_INVALID_STATE);
 
   ret := esp_board_manager_init_device_by_name(ESP_BOARD_DEVICE_NAME_DISPLAY_LCD);
   if ret <> ESP_OK then
@@ -130,8 +118,8 @@ begin
   end;
 
   FStarted := True;
-  if need_override then
-    writeln(TAG, ': I panel ready (overrides applied)')
+  if FOverridden then
+    writeln(TAG, ': I panel ready (app OverrideConfig)')
   else
     writeln(TAG, ': I panel ready (BMGR defaults)');
   Result := ESP_OK;

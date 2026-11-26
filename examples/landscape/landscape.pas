@@ -63,14 +63,13 @@ program landscape;
        while banking) - the accepted cost of the slow cadence.
     5. fps diagnostics live inside vga_flush (adapter side).
 
-  Display adapter facts (all verified on hardware, 2026-11-08):
-    - the BMGR-generated panel-io bounces PSRAM through internal RAM
-      (psram_dma_direct off); the panel comes up through the boarddisplay
-      unit, which patches the generated config (psram_dma_direct +
-      80 MHz) via BMGR's official re-init path - the panel object stays
-      BMGR-owned.
-    - the generated 40 MHz pclk is raised to 80 MHz (wire 11.5 ms per
-      full frame) - the panel class standard clock.
+  Display adapter facts (all verified on hardware, 2026-11-08;
+  SPI policy now lives in esp_mosaico board_devices.yaml):
+    - TBoardDisplay.Start brings up display_lcd yaml-as-is
+      (psram_dma_direct + 80 MHz in BMGR yaml / gen_bmgr_codes); the
+      panel object stays BMGR-owned. Facade does not invent SPI patches.
+    - 80 MHz pclk is the panel class standard clock (wire ~11.5 ms per
+      full frame when set in yaml).
     - draw_bitmap x_end/y_end are EXCLUSIVE in this driver (CASET gets
       x_end-1): the full frame is (0,0,W,H). Passing W-1/H-1 leaves the
       last column/row unwritten and shears every row by one pixel.
