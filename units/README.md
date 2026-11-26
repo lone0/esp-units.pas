@@ -222,7 +222,7 @@ mutate a BMGR config copy themselves and call
 `TBoardDisplay.OverrideConfig` **before** `Start` (see unit header).
 Hands out the BMGR-owned handle via `TBoardDisplay.Panel`. Halts on
 failure. Chip drivers come from the app `--lib` / SDK yaml. Consumers:
-`boardlvgl`, `../examples/board-suite/`, `../examples/landscape/`.
+`boardlvgl`, `../examples/landscape/`, `../examples/display-native/`.
 See repo `AGENTS.md` §3.9 and `../sdk/PROFILES.md`.
 
 ## `boardlvgl` — LVGL display-chain facade (L2)

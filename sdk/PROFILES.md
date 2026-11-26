@@ -1,4 +1,4 @@
-# IDF SDK profiles for one Pascal suite
+# IDF SDK profiles (same Pascal units)
 
 **Agent rule (also `AGENTS.md` §3.9):** hardware configuration belongs in
 the IDF build’s BMGR board YAML (`board_devices.yaml` / peripherals /
@@ -10,11 +10,11 @@ Three ESP-IDF project trees (already on this machine) back the same
 `units/` sources. Switch only `ESP32_SDK_PROJECT` (and the mosaico lib
 list vs the generic hello list).
 
-| Profile | Path | Board / quirks | Pascal entry |
-|---------|------|----------------|--------------|
-| **esp32sim mosaico** | `$HOME/lvgl-mosaico-s31` | `esp_mosaico`; `MOSAICO_VCC_RAMP_MS=0` (GPIO VCC); ptable `0xA000`; SPI 80 MHz + `psram_dma_direct` in yaml | `examples/board-suite/board_suite.pas` |
-| **real mosaico** | `$HOME/mosaico-s31` | same yaml SPI policy; `MOSAICO_VCC_RAMP_MS=100` (LEDC ramp); ptable `0x8000` | same `board_suite.pas` |
-| **generic S31** | `$HOME/idf-build-s31` | hello_world, no BMGR panel | `examples/board-suite/board_suite_generic.pas` |
+| Profile | Path | Board / quirks | Smoke with |
+|---------|------|----------------|------------|
+| **esp32sim mosaico** | `$HOME/lvgl-mosaico-s31` | `esp_mosaico`; `MOSAICO_VCC_RAMP_MS=0` (GPIO VCC); ptable `0xA000`; SPI 80 MHz + `psram_dma_direct` in yaml | `examples/landscape/` or `examples/display-native/` |
+| **real mosaico** | `$HOME/mosaico-s31` | same yaml SPI policy; `MOSAICO_VCC_RAMP_MS=100` (LEDC ramp); ptable `0x8000` | same examples on hardware |
+| **generic S31** | `$HOME/idf-build-s31` | hello_world, no BMGR panel | `examples/idfheap-smoke.pas` (or any non-panel program) |
 
 ## Yaml SPI policy (both mosaico trees)
 
@@ -43,7 +43,9 @@ Confirm `components/gen_bmgr_codes/gen_board_device_config.c` shows
 
 ## Pascal
 
-- `TBoardDisplay.Start` / `TBoardLvgl.Start` = yaml-as-is (`DefaultConfig`).
+- `TBoardDisplay.Start` / `TBoardLvgl.Start` = yaml-as-is.
+- Optional app-owned `TBoardDisplay.OverrideConfig` before `Start` (facade
+  does not invent SPI fields).
 - `board_mosaico` = CO5300 brightness helper only (optional).
 - Do **not** put SPI policy back into Pascal L2.
 
@@ -51,6 +53,6 @@ Confirm `components/gen_bmgr_codes/gen_board_device_config.c` shows
 
 | Profile | Smoke here | Needs |
 |---------|------------|--------|
-| esp32sim mosaico | esp32sim `--board mosaico` | This VM (see board-suite README) |
+| esp32sim mosaico | esp32sim `--board mosaico` | This VM; see `examples/landscape/README.md` |
 | real mosaico | flash ESP-Mosaico | Real hardware |
 | generic S31 | QEMU/esp-emu or flash | Optional; no panel |
