@@ -70,7 +70,6 @@ workspace was removed *after* every one of its functions moved here.
 | `units/boarddisplay.pas` | L2 panel chain (LVGL-free, board-agnostic): `Start` = BMGR yaml via `gen_bmgr_codes`; optional `OverrideConfig` is a passthrough — **app** mutates the config, facade does not invent SPI fields; no chip `{$linklib}`; `Panel`; halts on failure |
 | `units/boardlvgl.pas` | L2 LVGL facade (board-agnostic): `Start` / `StartEx` → `boarddisplay.Start` + adapter; `TBoardLvglConfig` = adapter policy only; no touch-chip `{$linklib}`; callbacks/TE/mono stay L1 |
 | `units/board_mosaico.pas` | App-opt-in Mosaico vendor helper only (`MosaicoSetBrightness`); SPI policy is in BMGR yaml, not here |
-| `sdk/PROFILES.md` | IDF SDK profiles (sim mosaico / real mosaico / generic S31) + yaml regen recipe for agents |
 | `units/imuattitude.pas` | L2 tilt angles (ex bmi270tilt, renamed 2026-11-11): `TImuAttitude.InitBmi270(periph, addr)/Read`; boot-pose baseline; roll+pitch only (yaw = not provided); consumers keep board facts (addr) app-side |
 | `units/README.md` | API docs + the **L1/L2 naming grammar** (`c_<C component>` = binding shadow, functional name = Pascal-native) + examples for published units; points at `units/espatomics/` for atomics |
 | `tests/` | the suite: 32 renamed webtbs regressions (incl. compile-only `u_generics_pubsub_events.pas`) + `t_generics_collections_tstack` (moved demo); `run-tests.sh`, `README.md` per-test docs. Self-authored cases are NOT committed (policy 2026-10-24; the self-authored `t_encoding_roundtrip` and `tests/thread-stubs/` were removed 2026-11-12 — upstream thread cases live in FPCSource `tests/test/`). |
@@ -141,7 +140,8 @@ workspace was removed *after* every one of its functions moved here.
    those fields for the app. If BMGR cannot model something (e.g. a vendor
    brightness register), the application (or a thin app-owned helper)
    may provide it; ask before enlarging shared units with hardware-
-   specific code. Profiles and regen recipe: `sdk/PROFILES.md`.
+   specific code. IDF profile paths + yaml regen live outside this repo
+   (Project store `docs/idf-sdk-profiles.md`).
 
 ## 4. Environment interfaces
 

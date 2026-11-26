@@ -223,7 +223,7 @@ mutate a BMGR config copy themselves and call
 Hands out the BMGR-owned handle via `TBoardDisplay.Panel`. Halts on
 failure. Chip drivers come from the app `--lib` / SDK yaml. Consumers:
 `boardlvgl`, `../examples/landscape/`, `../examples/display-native/`.
-See repo `AGENTS.md` §3.9 and `../sdk/PROFILES.md`.
+See repo `AGENTS.md` §3.9.
 
 ## `boardlvgl` — LVGL display-chain facade (L2)
 
@@ -243,7 +243,7 @@ hooks and TE/mono profiles stay L1 (`c_lvgl_adapter`). Consumer:
 SPI policy (`pclk_hz`, `psram_dma_direct`) lives in
 `esp_mosaico/board_devices.yaml` → `gen_bmgr_codes`. This unit only exposes
 `MosaicoSetBrightness` (CO5300 register BMGR does not model). L2 facades
-use yaml-as-is `Start`. See `../sdk/PROFILES.md`.
+use yaml-as-is `Start`.
 
 ## `imuattitude` — tilt angles (L2)
 
