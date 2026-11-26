@@ -164,7 +164,7 @@ uses the `c` prefix for C-library bindings: `cthreads`, `cmem`, `cwstring`):
 | Layer | Name grammar | Nature | Units |
 |---|---|---|---|
 | L1 binding | `c_<C component short name>` | hand-converted C-header shadow: `cdecl; external` functions keep their C names; records are C-ABI-true (`{$packrecords C}`, `{$minenumsize 4}`, sizes verified against the C build) | `c_bmgr`, `c_esp_lcd`, `c_lvgl_adapter`, `c_lvgl`, `c_bmi270` |
-| L2 native | functional name, no `c_` prefix | Pascal-idiomatic service built on L1: advanced records with static methods, value-semantics config, `esp_err_t` visible, no exceptions | `boarddisplay` (panel chain), `boardlvgl` (LVGL facade), `board_mosaico` (thin board pack), `imuattitude` (the functional `idfheap` and the `espatomics` sub-project predate the grammar and are L2 by nature) |
+| L2 native | functional name, no `c_` prefix | Pascal-idiomatic service built on L1: advanced records with static methods, value-semantics config, `esp_err_t` visible, no exceptions | `boarddisplay` (panel chain), `boardlvgl` (LVGL facade), `mosaico_helpers` (app-opt-in vendor helpers), `imuattitude` (the functional `idfheap` and the `espatomics` sub-project predate the grammar and are L2 by nature) |
 
 Rules the grammar enforces:
 
@@ -238,12 +238,12 @@ teardown. Full-board init stays L1 (`esp_board_manager_init`); callback
 hooks and TE/mono profiles stay L1 (`c_lvgl_adapter`). Consumer:
 `../examples/display-native/`.
 
-## `board_mosaico` — ESP-Mosaico vendor helpers only
+## `mosaico_helpers` — ESP-Mosaico vendor helpers only
 
 SPI policy (`pclk_hz`, `psram_dma_direct`) lives in
 `esp_mosaico/board_devices.yaml` → `gen_bmgr_codes`. This unit only exposes
 `MosaicoSetBrightness` (CO5300 register BMGR does not model). L2 facades
-use yaml-as-is `Start`.
+use yaml-as-is `Start`. App-opt-in (`units/mosaico_helpers.pp`).
 
 ## `imuattitude` — tilt angles (L2)
 
@@ -262,7 +262,7 @@ Where to look for what:
 
 | Directory | Content |
 |---|---|
-| `units/` | `idfheap` + self-contained `espatomics/` sub-project + L1 bindings (`c_bmgr`, `c_esp_lcd`, `c_lvgl_adapter`, `c_lvgl`, `c_bmi270`) + L2 (`boarddisplay` panel chain, `boardlvgl` LVGL facade, `board_mosaico` pack, `imuattitude`) |
+| `units/` | `idfheap` + self-contained `espatomics/` sub-project + L1 bindings (`c_bmgr`, `c_esp_lcd`, `c_lvgl_adapter`, `c_lvgl`, `c_bmi270`) + L2 (`boarddisplay` panel chain, `boardlvgl` LVGL facade, `mosaico_helpers`, `imuattitude`) |
 | `units/espatomics/` | ESP.Atomics docs + sources (see its `AGENTS.md`) |
 | `tests/` | compiler verification + demonstration programs (`tests/README.md` per test) |
 | `scripts/` | build / QEMU / flash automation, SoC-parameterized |

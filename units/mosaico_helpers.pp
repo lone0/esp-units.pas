@@ -1,15 +1,15 @@
-{ board_mosaico - thin ESP-Mosaico helpers for things BMGR does not model.
+{ mosaico_helpers - thin ESP-Mosaico helpers for things BMGR does not model.
 
   Hardware policy that yaml can express (chip, pins, geometry, SPI pclk /
   psram_dma_direct) lives in esp_mosaico board_devices.yaml + gen_bmgr_codes.
-  L2 facades (boarddisplay / boardlvgl) stay yaml-as-is via DefaultConfig.
+  L2 facades (boarddisplay / boardlvgl) stay yaml-as-is via Start.
 
   This unit keeps only vendor helpers outside BMGR devices - today the
-  CO5300 brightness register. Do not put SPI policy here.
+  CO5300 brightness register. Do not put SPI policy here. App-opt-in.
 
   Contract:
 
-    uses boarddisplay, board_mosaico;
+    uses boarddisplay, mosaico_helpers;
     ret := TBoardDisplay.Start;   { yaml / gen_bmgr defaults }
     panel := TBoardDisplay.Panel;
     ignore := MosaicoSetBrightness(panel, 60);
@@ -17,7 +17,7 @@
   App still needs --lib espressif__esp_lcd_co5300 when calling brightness
   (and for BMGR's panel factory). }
 
-unit board_mosaico;
+unit mosaico_helpers;
 
 {$mode objfpc}{$H+}
 {$linklib espressif__esp_lcd_co5300}

@@ -129,7 +129,7 @@ uses
   c_bmgr,            { esp_board_manager binding (units/, L1) }
   c_esp_lcd,         { esp_lcd panel ops binding (units/, L1) }
   boarddisplay,      { L2 panel chain: yaml-as-is BMGR display_lcd }
-  board_mosaico,     { optional CO5300 brightness only (not SPI policy) }
+  mosaico_helpers,   { optional CO5300 brightness only (not SPI policy) }
   imuattitude,       { TImuAttitude: two tilt angles off the BMI270 (L2) }
   Math;              { arctan2 for the ctrl task's homing guard }
 
