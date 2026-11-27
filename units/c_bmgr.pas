@@ -26,13 +26,18 @@
     same padding gcc does (verified sizes: dev_display_lcd_config_t = 108,
     spi_sub 72, touch_config_t 108, i2c_sub 56, spi_sub 48).
 
-  All API symbols are `external` and resolve against the whole-archived
-  libespressif__esp_board_manager.a (build.sh --lib). }
+  All API symbols are `external`; {$linklib} pulls the board-manager core
+  (`espressif__esp_board_manager`) and the SDK project's generated board
+  tables (`gen_bmgr_codes`). L2 units stay board-agnostic with no
+  {$linklib}; board-specific chip and transport archives are supplied by
+  the application on the `build.sh --lib` line. }
 
 unit c_bmgr;
 
 {$mode objfpc}{$H+}
 {$packrecords C}
+{$linklib gen_bmgr_codes}
+{$linklib espressif__esp_board_manager}
 {$minenumsize 4}
 
 interface
@@ -399,7 +404,7 @@ type
 
 { ------------------------------------------------- manager API (esp_board_manager.h) }
 
-{ Resolved from the whole-archived libespressif__esp_board_manager.a }
+{ Resolved from libespressif__esp_board_manager.a via {$linklib} }
 function esp_board_manager_init: esp_err_t; cdecl; external;
 function esp_board_manager_init_device_by_name(dev_name: PChar): esp_err_t; cdecl; external;
 function esp_board_manager_deinit_device_by_name(dev_name: PChar): esp_err_t; cdecl; external;

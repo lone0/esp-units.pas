@@ -3,33 +3,39 @@
 
   Layer grammar (units/README.md): unprefixed functional unit name = L2
   Pascal-native service built on the L1 bindings. The API is advanced-
-  record static methods; esp_err_t
-  stays visible; no exceptions; no state beyond the two stored handles
-  and the optional-device init snapshot - every Start call re-queries
-  the C registry, nothing is cached.
+  record static methods; esp_err_t stays visible; no exceptions; no
+  state beyond the two stored handles, the started guard, and the
+  optional-device init snapshot - Start queries the C registry directly,
+  no config is cached.
+
+  Board-agnostic: no touch-chip {$linklib}. The SDK project's yaml /
+  gen_bmgr_codes + the app's --lib line resolve CST9220 / whatever IC.
+  Panel SPI policy lives in BMGR yaml; boarddisplay.Start is yaml-as-is.
+  Apps that patch display_lcd call TBoardDisplay.OverrideConfig themselves
+  before TBoardLvgl.Start (and before esp_board_manager_init if used, so
+  the panel is initialized only once; facade does not invent SPI fields).
 
   Contract:
 
-    uses boardlvgl;                       (bmgr display-chain devices
-                                             auto-initialized here)
+    uses boardlvgl;
     ...
-    if TBoardLvgl.Start <> ESP_OK then   (adapter init + register
-                                             display/touch + start)
+    if TBoardLvgl.Start <> ESP_OK then   (panel + touch/brightness + adapter
+                                             init, register, and start)
       ...;
     TBoardLvgl.UILock;
     lv_label_create(lv_screen_active());    (Pascal UI over c_lvgl)
     TBoardLvgl.UIUnlock;
 
-  - auto-init at use covers lcd_touch/lcd_brightness only (lazy
-    init_device_by_name, warn-and-continue, exactly like lvgl-s31
-    main.c); display_lcd is brought up inside Start by the boarddisplay
-    panel chain (psram_dma_direct + 80 MHz overrides included). Full-
-    board initialization (audio, buttons, battery, ...) stays L1: call
+  - StartEx first brings display_lcd up through boarddisplay.Start,
+    then lazily initializes lcd_touch/lcd_brightness (warn-and-continue,
+    exactly like the lvgl-s31 example). Full-board initialization
+    (audio, buttons, battery, ...) stays L1: call
     esp_board_manager_init() from c_bmgr yourself.
   - configuration is a value-semantics record (TBoardLvglConfig,
-    DefaultConfig = the display_lvgl-verified behavior). Callback hooks
-    (auto-sleep, touch custom read) and the TE/mono display profiles are
-    NOT in the L2 config - those need the L1 c_lvgl_adapter full API.
+    DefaultConfig = adapter defaults). Panel hardware stays in yaml /
+    optional app OverrideConfig. Callback hooks (auto-sleep, touch
+    custom read) and the TE/mono display profiles are NOT in the L2
+    config - those need the L1 c_lvgl_adapter full API.
   - after a successful Start, lv_screen_active() is live but the LVGL
     worker task owns rendering: wrap EVERY app-side LVGL call in
     UILock/UIUnlock (the lvgl_test_ui.c ui_acquire/ui_release pattern),
@@ -42,21 +48,22 @@ unit boardlvgl;
 
 {$mode objfpc}{$H+}
 {$modeswitch advancedrecords}
+{ Touch / LEDC / pm archives stay on the app --lib line with the chip
+  drivers. No {$linklib} here. }
 
 interface
 
 uses
   c_bmgr,          { esp_err_t, device-name constants, ppvoid }
   c_lvgl_adapter,  { adapter config types, macro equivalents, API, handles }
-  boarddisplay;    { L2 panel chain: display_lcd bring-up + board overrides }
+  boarddisplay;    { L2 panel chain: display_lcd bring-up }
 
 type
-  { Value-semantics configuration. Field defaults = the behavior of the
-    verified display_lvgl example (its main.c overrides + the PSRAM display
-    profile macro this board's CONFIG_SPIRAM=y selects). hor_res/ver_res
-    and the panel/io handles are deliberately absent - the facade reads
-    them from the bmgr device config at Start; that is the point of the
-    chain. }
+  { Value-semantics configuration. Field defaults = the adapter defaults
+    verified by display_lvgl. Panel SPI policy is BMGR yaml (or an app
+    TBoardDisplay.OverrideConfig before Start) — not fields here.
+    hor_res/ver_res and the panel/io handles are deliberately absent -
+    the facade reads them from the bmgr device config at Start. }
   TBoardLvglConfig = record
     { --- adapter worker: 1:1 with esp_lv_adapter_config_t values --- }
     TaskStackSize: cuint;        { default 6*1024, example-verified }
@@ -96,12 +103,13 @@ type
     { zero-arg default path: "one call lights the screen" }
     class function Start: esp_err_t; static; overload;
 
-    { fully configurable path. Brings the panel up through the
-      boarddisplay chain (TBoardDisplay.Start), brings the adapter up,
-      registers the display (SPI+PSRAM branch, runtime sub_type fallbacks
-      mirror
-      main.c's CONFIG-gated #else branches) and - if lcd_touch
-      initialized - touch, then starts the worker. Stores the handles. }
+    { fully configurable path. Brings the panel up through
+      TBoardDisplay.Start (yaml-as-is / prior OverrideConfig), lazily
+      initializes lcd_touch/lcd_brightness, brings the adapter up,
+      registers the display (SPI+PSRAM branch, runtime sub_type
+      fallbacks mirror main.c's CONFIG-gated #else branches) and - if
+      lcd_touch initialized - touch, then starts the worker. Stores the
+      handles. }
     class function StartEx(
       const AConfig: TBoardLvglConfig): esp_err_t; static; overload;
 
@@ -129,14 +137,32 @@ const
 function strcmp(a, b: PChar): cint; cdecl; external;
 
 var
-  { optional-device init snapshots, taken once when the unit is
-    initialized; display_lcd is not here - TBoardDisplay.Start owns it }
+  { optional-device init snapshots, taken once by StartEx after
+    display_lcd is live; display_lcd is not here -
+    TBoardDisplay.Start owns it }
   TouchInited: esp_err_t;
   BrightnessInited: esp_err_t;
+  OptionalDevicesInited: Boolean = False;
 
   FDisplay: plv_display_t = nil;
   FTouch: plv_indev_t = nil;
   FStarted: Boolean = False;
+
+procedure InitOptionalDevices;
+begin
+  if OptionalDevicesInited then
+    exit;
+  OptionalDevicesInited := True;
+  TouchInited := esp_board_manager_init_device_by_name(
+    ESP_BOARD_DEVICE_NAME_LCD_TOUCH);
+  if TouchInited <> ESP_OK then
+    writeln(TAG, ': W init lcd_touch: ', TouchInited, ', continue');
+
+  BrightnessInited := esp_board_manager_init_device_by_name(
+    ESP_BOARD_DEVICE_NAME_LCD_BRIGHTNESS);
+  if BrightnessInited <> ESP_OK then
+    writeln(TAG, ': W init lcd_brightness: ', BrightnessInited, ', continue');
+end;
 
 { --------------------------------------------------------------- TBoardLvgl }
 
@@ -185,13 +211,12 @@ var
 begin
   if FStarted then
     exit(ESP_ERR_INVALID_STATE);
-  { the panel chain (display_lcd bring-up + this board's
-    psram_dma_direct + 80 MHz overrides) lives in the boarddisplay unit;
-    it writeln's and halts inside on failure - a panel that did not come
-    up leaves nothing to return to }
+  { Panel chain is boarddisplay (yaml-as-is, or app OverrideConfig
+    before this call). It writeln's and halts inside on failure. }
   ret := TBoardDisplay.Start;
   if ret <> ESP_OK then
     exit(ret);
+  InitOptionalDevices;
 
   writeln(TAG, ': I Initializing LVGL adapter...');
   adapter_config := Default(esp_lv_adapter_config_t);
@@ -309,7 +334,6 @@ begin
         writeln(TAG, ': I Touch input added');
     end;
   end;
-
   ret := esp_lv_adapter_start;
   if ret <> ESP_OK then
   begin
@@ -369,23 +393,5 @@ class function TBoardLvgl.Touch: plv_indev_t;
 begin
   Result := FTouch;
 end;
-
-initialization
-
-{ use = the optional display-chain devices are initialized: lazy
-  init_device_by_name, warn-and-continue - the lvgl-s31 main.c behavior.
-  display_lcd is deliberately absent: TBoardDisplay.Start (boarddisplay
-  panel chain) owns its whole lifecycle, overrides included.
-  Runs inside PASCALMAIN (app_main context), after the software USB
-  console wrap chain is up, so writeln is live. }
-TouchInited := esp_board_manager_init_device_by_name(
-  ESP_BOARD_DEVICE_NAME_LCD_TOUCH);
-if TouchInited <> ESP_OK then
-  writeln(TAG, ': W init lcd_touch: ', TouchInited, ', continue');
-
-BrightnessInited := esp_board_manager_init_device_by_name(
-  ESP_BOARD_DEVICE_NAME_LCD_BRIGHTNESS);
-if BrightnessInited <> ESP_OK then
-  writeln(TAG, ': W init lcd_brightness: ', BrightnessInited, ', continue');
 
 end.

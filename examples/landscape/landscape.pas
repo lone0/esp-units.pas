@@ -1,7 +1,7 @@
 program landscape;
 
-{ SWAG 0119.PAS "Landscape" (Marcin Borkowski, 1994-08-24) on the
-  ESP-Mosaico CO5300 480x480 QSPI AMOLED - fidelity port, native panel
+{ SWAG 0119.PAS "Landscape" (Marcin Borkowski, 1994-08-24) on an
+  esp_board_manager 480x480 RGB565 panel - fidelity port, native panel
   resolution.
 
   Architecture: the 1994 code is kept LINE-ALIGNED (pal, ncol, plasma,
@@ -63,15 +63,11 @@ program landscape;
        while banking) - the accepted cost of the slow cadence.
     5. fps diagnostics live inside vga_flush (adapter side).
 
-  Display adapter facts (all verified on hardware, 2026-11-08):
-    - the BMGR-generated panel-io bounces PSRAM through internal RAM
-      (psram_dma_direct off); the panel comes up through the boarddisplay
-      unit, which patches the generated config (psram_dma_direct +
-      80 MHz) via BMGR's official re-init path - the panel object stays
-      BMGR-owned.
-    - the generated 40 MHz pclk is raised to 80 MHz (wire 11.5 ms per
-      full frame) - the panel class standard clock.
-    - draw_bitmap x_end/y_end are EXCLUSIVE in this driver (CASET gets
+  Display adapter facts:
+    - TBoardDisplay.Start brings up display_lcd yaml-as-is from BMGR /
+      gen_bmgr_codes; the panel object stays BMGR-owned. SPI clock and
+      DMA flags live in the SDK project's board_devices.yaml.
+    - draw_bitmap x_end/y_end are EXCLUSIVE in esp_lcd (CASET gets
       x_end-1): the full frame is (0,0,W,H). Passing W-1/H-1 leaves the
       last column/row unwritten and shears every row by one pixel.
     - NO sync to the panel scan: flushes start at a random phase, so
@@ -129,7 +125,7 @@ uses
                        xTaskCreatePinnedToCore external below) }
   c_bmgr,            { esp_board_manager binding (units/, L1) }
   c_esp_lcd,         { esp_lcd panel ops binding (units/, L1) }
-  boarddisplay,      { L2 panel chain: BMGR panel + psram_dma_direct/80MHz }
+  boarddisplay,      { L2 panel chain: yaml-as-is BMGR display_lcd }
   imuattitude,       { TImuAttitude: two tilt angles off the BMI270 (L2) }
   Math;              { arctan2 for the ctrl task's homing guard }
 
@@ -190,8 +186,7 @@ var
 const
   TAG = 'LANDSCAPE';
 
-  { panel geometry (CO5300, BMGR generated config: 480x480, RGB565 BE,
-    QSPI, rotation identity) }
+  { panel geometry (480x480, RGB565 BE, rotation identity) }
   W = 480;
   H = 480;
 
@@ -356,8 +351,8 @@ begin
 end;
 
 { everything the 94 program had no equivalent for: board bring-up (the
-  panel chain itself - BMGR device + overrides + brightness - lives in
-  the boarddisplay unit), the double frame buffer, the control task }
+  panel chain itself lives in the boarddisplay unit), the double frame
+  buffer, the control task }
 procedure esp_init;
 var
   ret: esp_err_t;
@@ -373,33 +368,29 @@ begin
   end;
   writeln(TAG, ': I board manager init ok');
 
-  { dev_gpio_ctrl semantics: init drives active_level=1 -> constant
-    vibration until told otherwise (pi_display.c / board_motor.c hedge) }
+  { dev_gpio_ctrl semantics: if the board defines a vibration_motor device
+    with active_level=1, pull it low after init }
   motorh := nil;
   if (esp_board_manager_get_device_handle('vibration_motor', @motorh) = ESP_OK) and
      (motorh <> nil) then
     gpio_set_level(PPeriphGpioHandle(motorh)^.gpio_num, 0);
 
-  { the panel chain: BMGR bring-up with this board's psram_dma_direct +
-    80 MHz overrides + the vendor-register brightness handling - the
-    whole sequence and its rationale live in the boarddisplay unit }
+  { Panel from BMGR yaml / gen_bmgr_codes }
   ret := TBoardDisplay.Start;
   if ret <> ESP_OK then
     halt;                          { Start halts inside on failure anyway }
   panel := TBoardDisplay.Panel;
 
   { BMI270 tilt steering: the sensor chain (open on the BMGR i2c_master
-     bus at the board's 0x69, config, boot-pose baseline) lives in the
-     imuattitude unit; failure just means the ctrl task falls back to
-     the wander simulation. The periph name and address are board
-     facts - they stay here }
+     bus, config, boot-pose baseline) lives in the imuattitude unit;
+     failure just means the ctrl task falls back to the wander simulation }
   if tilt.InitBmi270('i2c_master', BMI270_I2C_ADDR) then
     writeln(TAG, ': I BMI270 up - tilt steering, lateral zero=',
             tilt.ax0:5:2, 'g')
   else
     writeln(TAG, ': W no BMI270 - wander simulation');
 
-  { double frame buffer, cache-line aligned for the DMA-direct path,
+  { double frame buffer, cache-line aligned for DMA,
     tail slack for the 94 row-overpaint quirk (see FRAME_SLACK) }
   for b := 0 to 1 do
   begin
@@ -412,7 +403,6 @@ begin
   ctrl_dturn := 0; ctrl_dx := 0; ctrl_dy := 0;
   scr := frame[0];                 { draw paints here; vga_flush flips it }
   last_us := esp_timer_get_time;
-  writeln(TAG, ': I display ready (psram_dma_direct, 80 MHz)');
 
   { the control task always runs (sensor steering or the wander sim).
     Created LAST so everything it touches is already up.

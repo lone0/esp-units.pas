@@ -6,10 +6,10 @@ program display_native;
   No C sources are linked (no --c): every UI element is created from
   Pascal, on the lvgl-s31 SDK project (ESP-Mosaico) with its software USB
   CDC console chain. The program body IS app_main (PASCALMAIN), as in the
-  display_lvgl example; the facade's unit initialization has already
-  lazily initialized the optional chain devices (touch, brightness) by
-  the time the body runs, and TBoardLvgl.Start brings the panel up
-  through the boarddisplay chain on the way.
+  display_lvgl example; TBoardLvgl.Start brings the panel up through
+  boarddisplay using BMGR yaml / gen_bmgr defaults and lazily initializes
+  the optional chain devices (touch, brightness) before starting the
+  adapter.
 
   The red button doubles as the packed-lv_color_t ABI probe: lv_color_t
   is a 3x uint8 C struct passed by value (psABI-bitified into one
@@ -30,17 +30,24 @@ program display_native;
         --lib lvgl__lvgl --lib espressif__esp_lvgl_adapter \
         ... (the full --lib set is in this directory's README.md) ...
 
-  Configurable variant (values are the facade defaults shown):
+  Yaml-as-is start (SPI policy is in esp_mosaico board_devices.yaml):
+
+    ret := TBoardLvgl.Start;
+
+  Or tune adapter-only fields (panel SPI stays in yaml):
 
     var
       cfg: TBoardLvglConfig;
     begin
       cfg := TBoardLvgl.DefaultConfig;
-      cfg.TaskPriority  := 5;
-      cfg.Rotation      := ESP_LV_ADAPTER_ROTATE_180;
-      cfg.TouchScaleY   := 1.0;
+      cfg.TaskPriority := 5;
       ret := TBoardLvgl.StartEx(cfg);
     end.
+
+  App-owned BMGR panel patch (optional; before Start):
+
+    TBoardDisplay.OverrideConfig(@devcfg, SizeOf(devcfg));
+    TBoardLvgl.Start;
 
   idfheap comes first in uses - the IDF-backed heap manager must be
   installed before anything else allocates (the units' init or the string
@@ -52,7 +59,7 @@ uses
   idfheap,        { MUST be first: installs the IDF heap manager }
   c_bmgr,         { L1: esp_err_t }
   c_lvgl,         { L1: LVGL 9.6 working subset }
-  boardlvgl;   { L2: facade - use = display chain initialized }
+  boardlvgl;      { L2: facade - BMGR device names + LVGL adapter }
 
 { FreeRTOS; pdMS_TO_TICKS(1000) = 100 ticks at this sdkconfig's
   CONFIG_FREERTOS_HZ=100 }

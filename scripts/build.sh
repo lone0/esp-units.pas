@@ -495,6 +495,7 @@ for o in $C_OBJS; do
   case "$o" in /*) ;; *) o="$(pwd)/$o" ;; esac
   LINK_EXTRA="$LINK_EXTRA -k$o"
 done
+GROUP_LIBS=
 for l in $C_LIBS; do
   case "$l" in
     *.a|*/*) p=$l ;;
@@ -509,10 +510,12 @@ for l in $C_LIBS; do
     echo "       searched the derived -Fl dirs; pass a path to the .a instead" >&2
     exit 1
   }
-  # FPC hands -k arguments to the linker *before* its own objects, so a plain
-  # archive reference would be scanned before anything needs it. Pull every
-  # member in instead; for a small C-module archive that is the intended use.
-  LINK_EXTRA="$LINK_EXTRA -k--whole-archive -k$p -k--no-whole-archive"
+  case "$p" in /*) ;; *) p="$(pwd)/$p" ;; esac
+  add_fl "$(dirname "$p")"
+  # Place --lib archives into link.res's post-object GROUP(...) instead of
+  # forcing -k--whole-archive before FPC's objects: the linker then resolves
+  # circular archive references normally and pulls only referenced members.
+  GROUP_LIBS="$GROUP_LIBS $p"
 done
 
 
@@ -526,10 +529,7 @@ done
 #     ENABLE): libesp_system.a's panic handling references esp_core_dump_
 #     write then. Detected by archive presence, not config keys -- a
 #     coredump-disabled project can still carry ENABLE_TO_NONE=y.
-# FPC only injects an archive for a {$linklib} in a USED unit, and it hands
-# -k arguments to the linker *before* its own objects, so a plain archive
-# reference would be scanned before anything needs it (a static archive is
-# only scanned once): pull every member in instead -- a few KB each.
+# Injected into link.res's GROUP(...) alongside --lib (no --whole-archive).
 CFGH=$PRJ/build/config/sdkconfig.h
 if grep -aq '^#define CONFIG_SPIRAM 1' "$CFGH" 2>/dev/null; then
   PSRAM_A=$PRJ/build/esp-idf/esp_psram/libesp_psram.a
@@ -537,21 +537,48 @@ if grep -aq '^#define CONFIG_SPIRAM 1' "$CFGH" 2>/dev/null; then
     echo "SPIRAM sdkconfig detected in $CFGH but $PSRAM_A is missing - rebuild the SDK project first" >&2
     exit 1
   }
-  LINK_EXTRA="$LINK_EXTRA -k--whole-archive -k$PSRAM_A -k--no-whole-archive"
+  GROUP_LIBS="$GROUP_LIBS $PSRAM_A"
 fi
 COREDUMP_A=$PRJ/build/esp-idf/espcoredump/libespcoredump.a
 if [ -f "$COREDUMP_A" ]; then
-  LINK_EXTRA="$LINK_EXTRA -k--whole-archive -k$COREDUMP_A -k--no-whole-archive"
+  GROUP_LIBS="$GROUP_LIBS $COREDUMP_A"
+  grep -aq '^#define CONFIG_ESP_COREDUMP_ENABLE 1' "$CFGH" 2>/dev/null && \
+    LINK_EXTRA="$LINK_EXTRA -k-u -kesp_system_include_coredump_init"
+fi
+
+# --- BMGR registration hooks (when gen_bmgr_codes is in the SDK build) -------
+# esp_board_manager dispatches subtypes via linker-section tables and weak
+# factory/pre_init hooks. Build the -u list from sdkconfig.h here, and apply it
+# in the ld shim ONLY when link.res actually pulls libespressif__esp_board_manager.a
+# (i.e. the program uses c_bmgr). Non-BMGR programs (e.g. the regression suite)
+# stay untouched even when built against a BMGR-enabled SDK tree.
+BMGR_U_FLAGS=
+BMGR_GEN_A=$PRJ/build/esp-idf/gen_bmgr_codes/libgen_bmgr_codes.a
+if [ -f "$BMGR_GEN_A" ]; then
+  BMGR_U_FLAGS="-u esp_board_runtime_pre_init -u lcd_panel_factory_entry_t -u lcd_touch_factory_entry_t"
+  grep -aq '^#define CONFIG_ESP_BOARD_DEV_DISPLAY_LCD_SUB_SPI_SUPPORT 1' "$CFGH" 2>/dev/null && \
+    BMGR_U_FLAGS="$BMGR_U_FLAGS -u dev_display_lcd_sub_spi_init"
+  grep -aq '^#define CONFIG_ESP_BOARD_DEV_LCD_TOUCH_SUB_I2C_SUPPORT 1' "$CFGH" 2>/dev/null && \
+    BMGR_U_FLAGS="$BMGR_U_FLAGS -u dev_lcd_touch_sub_i2c_init"
+  grep -aq '^#define CONFIG_ESP_BOARD_DEV_POWER_CTRL_SUB_CUSTOM_SUPPORT 1' "$CFGH" 2>/dev/null && \
+    BMGR_U_FLAGS="$BMGR_U_FLAGS -u dev_power_ctrl_sub_custom_init"
+  grep -aq '^#define CONFIG_ESP_BOARD_DEV_POWER_CTRL_SUB_GPIO_SUPPORT 1' "$CFGH" 2>/dev/null && \
+    BMGR_U_FLAGS="$BMGR_U_FLAGS -u dev_power_ctrl_sub_gpio_init"
+  grep -aq '^#define CONFIG_ESP_BOARD_DEV_BUTTON_SUB_GPIO_SUPPORT 1' "$CFGH" 2>/dev/null && \
+    BMGR_U_FLAGS="$BMGR_U_FLAGS -u dev_button_sub_gpio_init"
+  grep -aq '^#define CONFIG_ESP_BOARD_DEV_CAMERA_SUB_DVP_SUPPORT 1' "$CFGH" 2>/dev/null && \
+    BMGR_U_FLAGS="$BMGR_U_FLAGS -u dev_camera_sub_dvp_init"
+  grep -aq '^#define CONFIG_CAMERA_OV3640 1' "$CFGH" 2>/dev/null && \
+    BMGR_U_FLAGS="$BMGR_U_FLAGS -u ov3640_detect"
+  grep -aq '^#define CONFIG_CAMERA_SC101IOT 1' "$CFGH" 2>/dev/null && \
+    BMGR_U_FLAGS="$BMGR_U_FLAGS -u sc101iot_detect"
 fi
 
 # --- OTG CDC console (usb_hs_console component in the SDK project) -----------
 # When the IDF project links the usb_hs_console component (Type-C OTG CDC
 # console + auto-download reset, e.g. hello-s31 for the ESP-Mosaico), pull
-# the console chain in here. Same reasoning as above: a {$linklib} directive
-# would be scanned too early, and plain -k archives land before FPC's
-# objects. The chain initializes through the app_main linker wrap emitted
-# below, which runs BEFORE the RTL's app_main (= PASCALMAIN), so every
-# writeln reaches the host CDC with zero per-source directives.
+# the console chain into link.res's GROUP(...) and force __wrap_app_main via
+# -u so the linker pulls only the required TinyUSB objects (no --whole-archive).
 USB_CONSOLE_A=$PRJ/build/esp-idf/usb_hs_console/libusb_hs_console.a
 if [ -f "$USB_CONSOLE_A" ]; then
   for l in espressif__esp_tinyusb espressif__tinyusb esp_hal_usb; do
@@ -560,9 +587,45 @@ if [ -f "$USB_CONSOLE_A" ]; then
       echo "usb_hs_console detected but $A is missing - rebuild the SDK project first" >&2
       exit 1
     }
-    LINK_EXTRA="$LINK_EXTRA -k--whole-archive -k$A -k--no-whole-archive"
+    GROUP_LIBS="$GROUP_LIBS $A"
   done
-  LINK_EXTRA="$LINK_EXTRA -k--whole-archive -k$USB_CONSOLE_A -k--no-whole-archive -k--wrap=app_main"
+  GROUP_LIBS="$GROUP_LIBS $USB_CONSOLE_A"
+  LINK_EXTRA="$LINK_EXTRA -k-u -k__wrap_app_main -k--wrap=app_main"
+fi
+
+if [ -n "$GROUP_LIBS" ] || [ -n "$BMGR_U_FLAGS" ]; then
+  LD_SHIM_DIR=$(mktemp -d "${TMPDIR:-/tmp}/esp-units-ld.XXXXXX")
+  trap 'rm -rf "$LD_SHIM_DIR"' EXIT
+  export GROUP_LIBS BMGR_U_FLAGS REAL_LD="$TC_BIN/${BIN_PREFIX}ld"
+  cat >"$LD_SHIM_DIR/${BIN_PREFIX}ld" <<'EOF'
+#!/bin/sh
+EXTRA_LD_FLAGS=
+for a in "$@"; do
+  case "$a" in
+    *link*.res)
+      if [ -f "$a" ]; then
+        if [ -n "$BMGR_U_FLAGS" ] && grep -Eq '(-l|lib)espressif__esp_board_manager' "$a" 2>/dev/null; then
+          EXTRA_LD_FLAGS="$BMGR_U_FLAGS"
+        fi
+        python3 - "$a" "$GROUP_LIBS" <<'PY'
+import os, sys
+res_path, libs_str = sys.argv[1], sys.argv[2]
+libs = [os.path.basename(p) for p in libs_str.split() if p]
+if libs:
+    txt = open(res_path, "r").read()
+    needle = "GROUP(\n"
+    if needle in txt:
+        txt = txt.replace(needle, needle + "\n".join(libs) + "\n", 1)
+        open(res_path, "w").write(txt)
+PY
+      fi
+      ;;
+  esac
+done
+exec "$REAL_LD" $EXTRA_LD_FLAGS "$@"
+EOF
+  chmod +x "$LD_SHIM_DIR/${BIN_PREFIX}ld"
+  export PATH="$LD_SHIM_DIR:$PATH"
 fi
 
 # RTL/package unit paths, derived: the cfg is optional (a bare or mid-rebuild
@@ -588,5 +651,5 @@ done
 # user-supplied options still override -XP/dirs. $FL_OPTS/$LINK_EXTRA/
 # $UNIT_DIRS are deliberately unquoted: they are space-separated option lists
 # built above.
-exec "$PPC" -Tfreertos "$MCU" "-WP$IDF_VER" "-XP$BIN_PREFIX" $ABI_OPT $FPU_OPT \
+"$PPC" -Tfreertos "$MCU" "-WP$IDF_VER" "-XP$BIN_PREFIX" $ABI_OPT $FPU_OPT \
   $UNIT_DIRS $FL_OPTS $LINK_EXTRA "$@"
